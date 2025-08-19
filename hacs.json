@@ -1,0 +1,11 @@
+{
+  "name": "Smart Sprinkler Control",
+  "version": "2025.1.0",
+  "domains": ["sensor"],
+  "iot_class": "Local Polling",
+  "homeassistant": "2024.8.0",
+  "zip_release": true,
+  "filename": "smart_sprinkler_control.zip",
+  "hide_default_branch": false,
+  "render_readme": true
+}

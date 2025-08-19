@@ -1,0 +1,107 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: check-added-large-files
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        args:
+          - --safe
+          - --quiet
+        language_version: python3
+        files: ^((custom_components|tests)/.+)?[^/]+\.py$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args:
+          - --profile=black
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        additional_dependencies:
+          - flake8-docstrings==1.7.0
+          - pydocstyle==6.3.0
+        files: ^(custom_components|tests)/.+\.py$
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.1
+    hooks:
+      - id: mypy
+        args:
+          - --ignore-missing-imports
+        files: ^custom_components/.+\.py$
+
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        args:
+          - --configfile=pyproject.toml
+          - --severity-level=medium
+          - --confidence-level=medium
+        files: ^custom_components/.+\.py$
+
+  - repo: https://github.com/pyupio/safety
+    rev: 3.2.9
+    hooks:
+      - id: safety
+        args:
+          - check
+          - --json
+          - --ignore=70612  # Known issue with Jinja2 that's not exploitable in HA context
+
+  - repo: https://github.com/jendrikseipp/vulture
+    rev: v2.12
+    hooks:
+      - id: vulture
+        args:
+          - --min-confidence=60
+          - --exclude=tests,venv,config
+        files: ^custom_components/.+\.py$
+
+  - repo: local
+    hooks:
+      - id: check-todo-comments
+        name: Check for TODO comments in production code
+        entry: bash
+        language: system
+        args:
+          - -c
+          - |
+            if grep -r "TODO" custom_components/device_manager/ --include="*.py" --exclude-dir=tests --exclude-dir=scripts; then
+              echo "❌ Found TODO comments in production code. Please create GitHub issues instead."
+              exit 1
+            fi
+        pass_filenames: false
+
+      - id: validate-manifest
+        name: Validate manifest.json
+        entry: python3
+        language: system
+        args:
+          - -c
+          - |
+            import json
+            with open('custom_components/device_manager/manifest.json') as f:
+                manifest = json.load(f)
+            required_keys = ['domain', 'name', 'version', 'codeowners', 'documentation', 'issue_tracker']
+            missing = [k for k in required_keys if k not in manifest]
+            if missing:
+                print(f'❌ Missing required keys in manifest: {missing}')
+                exit(1)
+            print('✅ Manifest validation passed')
+        pass_filenames: false
+        files: custom_components/device_manager/manifest.json
