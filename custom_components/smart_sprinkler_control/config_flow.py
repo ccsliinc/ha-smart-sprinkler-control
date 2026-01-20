@@ -25,6 +25,36 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._system_name: Optional[str] = None
         self._zone_count: int = DEFAULT_ZONE_COUNT
         self._zone_names: Dict[int, str] = {}
+        self._zone_switches: Dict[int, str] = {}
+
+    async def async_step_import(
+        self, import_data: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle import from YAML configuration."""
+        if import_data is None:
+            return self.async_abort(reason="no_import_data")
+
+        system_name = import_data.get("system_name", "Smart Sprinkler System")
+
+        # Set unique ID and check for duplicates
+        await self.async_set_unique_id(system_name.lower().replace(" ", "_"))
+        self._abort_if_unique_id_configured()
+
+        _LOGGER.info("Importing Smart Sprinkler Control from YAML: %s", system_name)
+
+        # Create config entry directly from import data
+        return self.async_create_entry(
+            title=system_name,
+            data={
+                "system_name": system_name,
+                "zone_count": import_data.get("zone_count", DEFAULT_ZONE_COUNT),
+                "zone_names": import_data.get("zone_names", {}),
+                "zone_switches": import_data.get("zone_switches", {}),
+                "weather_entity": import_data.get("weather_entity"),
+                "rain_sensor_entity": import_data.get("rain_sensor_entity"),
+                "enable_weather_integration": import_data.get("weather_entity") is not None,
+            },
+        )
 
     async def async_step_user(
         self, user_input: Optional[Dict[str, Any]] = None
@@ -95,8 +125,8 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             self._zone_names = zone_names
 
-            # Proceed to optional weather integration
-            return await self.async_step_weather()
+            # Proceed to zone switch mapping
+            return await self.async_step_zone_switches()
 
         # Build dynamic schema for zone names
         schema_dict = {}
@@ -115,6 +145,45 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_zone_switches(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle zone to switch entity mapping step."""
+        errors: Dict[str, str] = {}
+
+        if user_input is not None:
+            # Extract zone switch mappings
+            zone_switches = {}
+            for i in range(1, self._zone_count + 1):
+                switch_entity = user_input.get(f"zone_{i}_switch")
+                if switch_entity:
+                    zone_switches[i] = switch_entity
+
+            self._zone_switches = zone_switches
+
+            # Proceed to optional weather integration
+            return await self.async_step_weather()
+
+        # Build dynamic schema for zone switch mappings
+        schema_dict = {}
+        for i in range(1, self._zone_count + 1):
+            zone_name = self._zone_names.get(i, f"Zone {i}")
+            schema_dict[vol.Optional(f"zone_{i}_switch")] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch")
+            )
+
+        data_schema = vol.Schema(schema_dict)
+
+        return self.async_show_form(
+            step_id="zone_switches",
+            data_schema=data_schema,
+            errors=errors,
+            description_placeholders={
+                "zone_count": str(self._zone_count),
+                "system_name": self._system_name or "Smart Sprinkler System",
+            },
+        )
+
     async def async_step_weather(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
@@ -125,6 +194,7 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "system_name": self._system_name,
                 "zone_count": self._zone_count,
                 "zone_names": self._zone_names,
+                "zone_switches": self._zone_switches,
                 "weather_entity": user_input.get("weather_entity"),
                 "rain_sensor_entity": user_input.get("rain_sensor_entity"),
                 "enable_weather_integration": user_input.get("enable_weather_integration", False),
@@ -138,12 +208,12 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Get available weather entities
         weather_entities = []
         rain_sensor_entities = []
-        
-        for entity_id, entity in self.hass.states.async_all().items():
-            if entity_id.startswith("weather."):
-                weather_entities.append(entity_id)
-            elif entity_id.startswith("binary_sensor.") and "rain" in entity_id.lower():
-                rain_sensor_entities.append(entity_id)
+
+        for state in self.hass.states.async_all():
+            if state.entity_id.startswith("weather."):
+                weather_entities.append(state.entity_id)
+            elif state.entity_id.startswith("binary_sensor.") and "rain" in state.entity_id.lower():
+                rain_sensor_entities.append(state.entity_id)
 
         # Build schema with available entities
         schema_dict = {

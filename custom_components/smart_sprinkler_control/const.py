@@ -40,6 +40,7 @@ CONF_ZONE_COUNT = "zone_count"
 CONF_ZONE_NAMES = "zone_names"
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_RAIN_SENSOR_ENTITY = "rain_sensor_entity"
+CONF_ZONE_SWITCHES = "zone_switches"
 
 # Defaults for sprinkler system
 DEFAULT_ZONE_COUNT = 8  # Typical sprinkler zone count

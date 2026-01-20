@@ -11,12 +11,13 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass
 class ZoneSettings:
     """Settings for a sprinkler zone."""
-    
+
     name: str
     duration: int = 15  # Default watering duration in minutes
     enabled: bool = True
     flow_rate: Optional[float] = None  # GPM (gallons per minute)
     area_sqft: Optional[float] = None  # Square footage for calculations
+    switch_entity: Optional[str] = None  # HA switch entity to control this zone
 
 
 @dataclass

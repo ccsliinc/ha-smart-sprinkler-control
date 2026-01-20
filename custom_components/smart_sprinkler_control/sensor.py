@@ -53,7 +53,7 @@ class SmartSprinklerManagerSensor(SensorEntity):
         self._config_entry = config_entry
         
         # Initialize the sprinkler system object
-        self._system_data = SmartSprinklerManagerSystem(
+        self._system_data = SprinklerSystem(
             system_name=system_name,
             entity_id=entity_id,
             zone_count=config_entry.data.get("zone_count", 8)
@@ -146,14 +146,14 @@ class SmartSprinklerManagerSensor(SensorEntity):
                 "remaining_time": zone.remaining_duration,
                 "runtime_today": zone.total_runtime_today,
                 "water_used_today": round(zone.total_water_used_today, 2),
-                "last_run": zone.last_run_date.isoformat() if zone.last_run_date else None,
+                "last_run": zone.last_watering_date.isoformat() if zone.last_watering_date else None,
                 
                 # Backend-calculated display properties
                 "display_title": self._get_zone_display_title(zone),
                 "status_color": self._get_zone_status_color(zone),
                 "status_text": self._get_zone_status_text(zone),
                 "can_start": zone.can_start(),
-                "is_running": zone.is_running(),
+                "is_running": zone.is_watering(),
             }
         
         # Add schedule information
@@ -196,7 +196,7 @@ class SmartSprinklerManagerSensor(SensorEntity):
         """Get backend-calculated display title for zone."""
         base_title = f"Zone {zone.zone_id}: {zone.settings.name}"
         
-        if zone.is_running() and zone.remaining_duration > 0:
+        if zone.is_watering() and zone.remaining_duration > 0:
             return f"{base_title} ({zone.remaining_duration}m remaining)"
         elif zone.state == "scheduled":
             return f"{base_title} (Scheduled)"
@@ -224,7 +224,7 @@ class SmartSprinklerManagerSensor(SensorEntity):
         """Get backend-calculated status text for zone."""
         if not zone.settings.enabled:
             return "Disabled"
-        elif zone.is_running():
+        elif zone.is_watering():
             return f"Running ({zone.remaining_duration}m)"
         elif zone.state == "scheduled":
             return "Scheduled"
