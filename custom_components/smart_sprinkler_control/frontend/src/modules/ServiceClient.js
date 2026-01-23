@@ -83,6 +83,21 @@ export class ServiceClient {
   }
 
   /**
+   * Adjust the remaining time for a running zone
+   * @param {string} entityId - System entity ID
+   * @param {number} zoneId - Zone ID (1-based)
+   * @param {number} newDuration - New remaining duration in minutes
+   * @returns {Promise} Service call result
+   */
+  async adjustZoneTime(entityId, zoneId, newDuration) {
+    return this.callService(SERVICES.ADJUST_ZONE_TIME, {
+      entity_id: entityId,
+      zone_id: zoneId,
+      duration: newDuration,
+    });
+  }
+
+  /**
    * Enable rain delay
    * @param {string} entityId - System entity ID
    * @param {number} hours - Delay hours (default 24)
@@ -142,6 +157,19 @@ export class ServiceClient {
    */
   async deleteSchedule(entityId, scheduleId) {
     return this.callService(SERVICES.DELETE_SCHEDULE, {
+      entity_id: entityId,
+      schedule_id: scheduleId,
+    });
+  }
+
+  /**
+   * Run a schedule immediately
+   * @param {string} entityId - System entity ID
+   * @param {string} scheduleId - Schedule ID to run
+   * @returns {Promise} Service call result
+   */
+  async runSchedule(entityId, scheduleId) {
+    return this.callService(SERVICES.RUN_SCHEDULE, {
       entity_id: entityId,
       schedule_id: scheduleId,
     });

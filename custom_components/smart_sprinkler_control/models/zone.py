@@ -23,17 +23,21 @@ class ZoneSettings:
 @dataclass
 class Zone:
     """Represents a single sprinkler zone."""
-    
+
     zone_id: int
     settings: ZoneSettings
-    
+
     # Current state
     state: str = "idle"  # idle, watering, scheduled, disabled, error, rain_delayed
     current_schedule_id: Optional[str] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     remaining_duration: int = 0  # minutes
-    
+
+    # Schedule queue - list of (zone_id, duration) tuples for remaining zones
+    # Passed from zone to zone during schedule execution
+    schedule_queue: List[tuple] = field(default_factory=list)
+
     # Statistics
     total_runtime_today: int = 0  # minutes
     total_runtime_week: int = 0  # minutes
@@ -64,48 +68,62 @@ class Zone:
         _LOGGER.info("Started watering zone %d for %d minutes", self.zone_id, duration)
         return True
     
-    def stop_watering(self) -> bool:
-        """Stop watering this zone."""
+    def stop_watering(self) -> tuple:
+        """Stop watering this zone.
+
+        Returns:
+            tuple: (success: bool, schedule_queue: list) - the queue of remaining zones
+        """
         if not self.is_watering():
-            return False
-        
+            return (False, [])
+
         actual_runtime = 0
         water_used = 0.0
-        
+
         if self.start_time:
             actual_runtime = int((datetime.now() - self.start_time).total_seconds() / 60)
             if self.settings.flow_rate:
                 water_used = (actual_runtime / 60.0) * self.settings.flow_rate
-        
+
+        # Capture the queue before clearing
+        remaining_queue = self.schedule_queue.copy()
+        schedule_id = self.current_schedule_id
+
         self.state = "idle"
         self.start_time = None
         self.end_time = None
         self.remaining_duration = 0
         self.current_schedule_id = None
+        self.schedule_queue = []  # Clear the queue
         self.last_watering_date = datetime.now()
-        
+
         # Update statistics
         self.total_runtime_today += actual_runtime
         self.total_runtime_week += actual_runtime
         self.total_water_used_today += water_used
         self.total_water_used_week += water_used
-        
-        _LOGGER.info("Stopped watering zone %d after %d minutes, used %.1f gallons", 
+
+        _LOGGER.info("Stopped watering zone %d after %d minutes, used %.1f gallons",
                     self.zone_id, actual_runtime, water_used)
-        return True
+
+        return (True, remaining_queue, schedule_id)
     
     def update_remaining_time(self) -> bool:
         """Update remaining duration based on current time."""
         if not self.is_watering() or not self.end_time:
             return False
-        
+
         remaining_seconds = (self.end_time - datetime.now()).total_seconds()
-        self.remaining_duration = max(0, int(remaining_seconds / 60))
-        
-        # Auto-stop if time is up
-        if self.remaining_duration <= 0:
+
+        # Auto-stop if time is up (use 1-second buffer for timing jitter)
+        # Without buffer, coordinator might run 3ms before end_time and miss the stop
+        if remaining_seconds <= 1:
             return self.stop_watering()
-        
+
+        # Use round() not int() to avoid truncation errors (299 sec = 5 min, not 4)
+        # Use max(1, ...) to ensure display shows at least 1 minute while running
+        self.remaining_duration = max(1, round(remaining_seconds / 60))
+
         return True
 
 
@@ -156,32 +174,32 @@ class SprinklerSchedule:
 @dataclass
 class SprinklerSystem:
     """Main sprinkler system class - zero sensor pollution architecture."""
-    
+
     # Basic system information
     system_name: str
     entity_id: str
     zone_count: int = 8  # Default zone count
-    
+
     # All zones stored as Python objects (NO SENSORS!)
     zones: Dict[int, Zone] = field(default_factory=dict)
-    
+
     # All schedules stored as Python objects (NO SENSORS!)
     schedules: Dict[str, SprinklerSchedule] = field(default_factory=dict)
-    
+
     # System state and settings (NO SENSORS!)
     is_enabled: bool = True
     rain_delay_active: bool = False
     rain_delay_end_time: Optional[datetime] = None
     weather_entity_id: Optional[str] = None
     rain_sensor_entity_id: Optional[str] = None
-    
+
     # System statistics (NO SENSORS!)
     total_water_used_today: float = 0.0  # gallons
     total_water_used_week: float = 0.0
     total_runtime_today: int = 0  # minutes
     total_runtime_week: int = 0
     active_zones_count: int = 0
-    
+
     # Connection and status (NO SENSORS!)
     is_connected: bool = True
     connection_status: str = "Connected"
@@ -197,51 +215,81 @@ class SprinklerSystem:
     def get_active_zones(self) -> List[Zone]:
         """Get list of currently watering zones."""
         return [zone for zone in self.zones.values() if zone.is_watering()]
+
+    def is_schedule_running(self) -> bool:
+        """Check if any schedule is currently running (zone has queue or schedule_id)."""
+        for zone in self.zones.values():
+            if zone.current_schedule_id or zone.schedule_queue:
+                return True
+        return False
+
+    def get_running_schedule_id(self) -> Optional[str]:
+        """Get the ID of the currently running schedule, if any."""
+        for zone in self.zones.values():
+            if zone.current_schedule_id:
+                return zone.current_schedule_id
+        return None
     
     def get_scheduled_zones(self) -> List[Zone]:
         """Get list of zones that are scheduled to run."""
         return [zone for zone in self.zones.values() if zone.state == "scheduled"]
     
     def start_zone(self, zone_id: int, duration: int, schedule_id: Optional[str] = None) -> bool:
-        """Start a specific zone."""
+        """Start a specific zone.
+
+        Only one zone can run at a time to maintain water pressure.
+        Starting a new zone will automatically stop any currently running zone.
+        """
         if zone_id not in self.zones:
             _LOGGER.error("Zone %d does not exist", zone_id)
             return False
-        
+
         if self.rain_delay_active:
             _LOGGER.warning("Cannot start zone %d: rain delay is active", zone_id)
             return False
-        
+
         if not self.is_enabled:
             _LOGGER.warning("Cannot start zone %d: system is disabled", zone_id)
             return False
-        
+
+        # Single-zone operation: stop any currently running zone first
+        active_zones = self.get_active_zones()
+        if active_zones:
+            for active_zone in active_zones:
+                _LOGGER.info("Stopping zone %d to start zone %d (single-zone operation)",
+                            active_zone.zone_id, zone_id)
+                active_zone.stop_watering()
+
         zone = self.zones[zone_id]
         result = zone.start_watering(duration, schedule_id)
-        
+
         if result:
             self.active_zones_count = len(self.get_active_zones())
             self.last_updated = datetime.now()
-        
+
         return result
     
-    def stop_zone(self, zone_id: int) -> bool:
-        """Stop a specific zone."""
+    def stop_zone(self, zone_id: int) -> tuple:
+        """Stop a specific zone.
+
+        Returns:
+            tuple: (success: bool, schedule_queue: list, schedule_id: str or None)
+        """
         if zone_id not in self.zones:
             _LOGGER.error("Zone %d does not exist", zone_id)
-            return False
-        
+            return (False, [], None)
+
         zone = self.zones[zone_id]
         result = zone.stop_watering()
-        
-        if result:
+
+        if result[0]:  # result is (success, queue, schedule_id)
             self.active_zones_count = len(self.get_active_zones())
             self.last_updated = datetime.now()
-            
+
             # Update system statistics
             self.total_runtime_today += zone.total_runtime_today
             self.total_water_used_today += zone.total_water_used_today
-        
+
         return result
     
     def stop_all_zones(self) -> bool:
@@ -301,13 +349,13 @@ class SprinklerSystem:
         self.last_updated = datetime.now()
     
     def create_schedule(self, schedule: SprinklerSchedule) -> bool:
-        """Create a new watering schedule."""
-        if schedule.schedule_id in self.schedules:
-            _LOGGER.warning("Schedule %s already exists", schedule.schedule_id)
-            return False
-        
+        """Create or update a watering schedule (upsert)."""
+        is_update = schedule.schedule_id in self.schedules
         self.schedules[schedule.schedule_id] = schedule
-        _LOGGER.info("Created schedule: %s", schedule.name)
+        if is_update:
+            _LOGGER.info("Updated schedule: %s", schedule.name)
+        else:
+            _LOGGER.info("Created schedule: %s", schedule.name)
         return True
     
     def delete_schedule(self, schedule_id: str) -> bool:

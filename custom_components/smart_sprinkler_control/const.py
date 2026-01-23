@@ -51,6 +51,7 @@ DEFAULT_RAIN_THRESHOLD = 0.1  # Rain threshold to skip watering (inches)
 SERVICE_START_ZONE = "start_zone"
 SERVICE_STOP_ZONE = "stop_zone"
 SERVICE_STOP_ALL_ZONES = "stop_all_zones"
+SERVICE_ADJUST_ZONE_TIME = "adjust_zone_time"
 SERVICE_START_SCHEDULE = "start_schedule"  # Remove if not using scheduling
 SERVICE_STOP_SCHEDULE = "stop_schedule"
 SERVICE_CREATE_SCHEDULE = "create_schedule"

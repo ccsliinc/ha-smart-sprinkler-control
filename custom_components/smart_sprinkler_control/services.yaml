@@ -1,0 +1,252 @@
+start_zone:
+  name: Start Zone
+  description: Start watering a specific zone
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    zone_id:
+      name: Zone ID
+      description: The zone number to start (1-based)
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    duration:
+      name: Duration
+      description: How long to water in minutes
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+
+stop_zone:
+  name: Stop Zone
+  description: Stop watering a specific zone
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    zone_id:
+      name: Zone ID
+      description: The zone number to stop (1-based)
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+
+stop_all_zones:
+  name: Stop All Zones
+  description: Stop all active zones
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+
+adjust_zone_time:
+  name: Adjust Zone Time
+  description: Adjust the remaining time for a running zone
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    zone_id:
+      name: Zone ID
+      description: The zone number to adjust (1-based)
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    duration:
+      name: New Duration
+      description: New remaining time in minutes
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 180
+          unit_of_measurement: minutes
+
+enable_rain_delay:
+  name: Enable Rain Delay
+  description: Enable rain delay to skip watering
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    hours:
+      name: Hours
+      description: Number of hours to delay
+      default: 24
+      selector:
+        number:
+          min: 1
+          max: 168
+          unit_of_measurement: hours
+
+disable_rain_delay:
+  name: Disable Rain Delay
+  description: Disable rain delay
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+
+update_zone_settings:
+  name: Update Zone Settings
+  description: Update settings for a zone
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    zone_id:
+      name: Zone ID
+      description: The zone number to update
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 32
+          mode: box
+    name:
+      name: Name
+      description: New name for the zone
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Default watering duration in minutes
+      selector:
+        number:
+          min: 1
+          max: 120
+          unit_of_measurement: minutes
+    enabled:
+      name: Enabled
+      description: Whether the zone is enabled
+      selector:
+        boolean:
+
+create_schedule:
+  name: Create Schedule
+  description: Create a new watering schedule
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    schedule_id:
+      name: Schedule ID
+      description: Unique identifier for the schedule
+      required: true
+      selector:
+        text:
+    name:
+      name: Name
+      description: Display name for the schedule
+      required: true
+      selector:
+        text:
+    zone_ids:
+      name: Zone IDs
+      description: List of zone numbers to water
+      required: true
+      selector:
+        object:
+    start_time:
+      name: Start Time
+      description: Time to start watering (HH:MM)
+      required: true
+      selector:
+        time:
+    days_of_week:
+      name: Days of Week
+      description: Days to run (0=Sunday, 6=Saturday)
+      required: true
+      selector:
+        object:
+
+delete_schedule:
+  name: Delete Schedule
+  description: Delete a watering schedule
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    schedule_id:
+      name: Schedule ID
+      description: ID of the schedule to delete
+      required: true
+      selector:
+        text:
+
+run_schedule:
+  name: Run Schedule
+  description: Manually run a schedule immediately
+  fields:
+    entity_id:
+      name: Entity
+      description: The sprinkler system entity
+      required: true
+      selector:
+        entity:
+          domain: sensor
+          integration: smart_sprinkler_control
+    schedule_id:
+      name: Schedule ID
+      description: ID of the schedule to run
+      required: true
+      selector:
+        text:

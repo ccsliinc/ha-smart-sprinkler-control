@@ -29,11 +29,13 @@ export const SERVICES = {
   START_ZONE: 'start_zone',
   STOP_ZONE: 'stop_zone',
   STOP_ALL_ZONES: 'stop_all_zones',
+  ADJUST_ZONE_TIME: 'adjust_zone_time',
   ENABLE_RAIN_DELAY: 'enable_rain_delay',
   DISABLE_RAIN_DELAY: 'disable_rain_delay',
   UPDATE_ZONE_SETTINGS: 'update_zone_settings',
   CREATE_SCHEDULE: 'create_schedule',
   DELETE_SCHEDULE: 'delete_schedule',
+  RUN_SCHEDULE: 'run_schedule',
 };
 
 /** Zone status types */
