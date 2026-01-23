@@ -37,6 +37,9 @@ if (!window.SmartSprinklerControlPanel) {
       this._healthCheckInterval = null;
       this._zoneStartTimes = new Map(); // Track when each zone started
 
+      // Rain chart state
+      this._rainChart = null;
+
       // Initialize modules
       this.serviceClient = new ServiceClient(this._hass);
       this.dataManager = new DataManager(this._hass, this.serviceClient);
@@ -88,6 +91,11 @@ if (!window.SmartSprinklerControlPanel) {
       }
       this._stopCountdownTimer();
       this._stopHealthCheck();
+      // Clean up rain chart
+      if (this._rainChart) {
+        this._rainChart.destroy();
+        this._rainChart = null;
+      }
       this.dataManager.destroy();
     }
 
@@ -586,6 +594,171 @@ if (!window.SmartSprinklerControlPanel) {
       }
     }
 
+    /**
+     * Render the rain accumulation graph section.
+     * Shows last 24 hours of rain data.
+     */
+    _renderRainGraph() {
+      return `
+        <div class="rain-graph-container" style="
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(0, 255, 255, 0.2);
+          border-radius: 8px;
+          padding: 16px;
+          margin-bottom: 20px;
+        ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
+              Rain Accumulation (24h)
+            </h3>
+            <span id="rain-total" style="color: #888; font-size: 12px;">Total: 0.0 mm</span>
+          </div>
+          <canvas id="rainChart" height="120"></canvas>
+        </div>
+      `;
+    }
+
+    /**
+     * Initialize the rain chart with mock data.
+     * Uses Chart.js to render a line graph of 24h rain accumulation.
+     */
+    _initRainChart() {
+      const canvas = this.querySelector('#rainChart');
+      if (!canvas || typeof Chart === 'undefined') return;
+
+      // Destroy existing chart if any
+      if (this._rainChart) {
+        this._rainChart.destroy();
+      }
+
+      const ctx = canvas.getContext('2d');
+
+      // Generate mock data for last 24 hours (hourly readings)
+      const now = new Date();
+      const labels = [];
+      const data = [];
+      let total = 0;
+
+      for (let i = 23; i >= 0; i--) {
+        const hour = new Date(now - i * 60 * 60 * 1000);
+        labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+
+        // Mock rain pattern - some rain in morning, clear afternoon
+        let rain = 0;
+        const h = hour.getHours();
+        if (h >= 6 && h <= 9) {
+          rain = Math.random() * 2.5; // Morning rain
+        } else if (h >= 14 && h <= 16) {
+          rain = Math.random() * 0.5; // Light afternoon shower
+        }
+        data.push(parseFloat(rain.toFixed(2)));
+        total += rain;
+      }
+
+      // Update total display
+      const totalEl = this.querySelector('#rain-total');
+      if (totalEl) {
+        totalEl.textContent = `Total: ${total.toFixed(1)} mm`;
+      }
+
+      this._rainChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Rain (mm)',
+            data: data,
+            borderColor: '#00ffff',
+            backgroundColor: 'rgba(0, 255, 255, 0.1)',
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: '#00ffff',
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              titleColor: '#00ffff',
+              bodyColor: '#fff',
+              borderColor: 'rgba(0, 255, 255, 0.3)',
+              borderWidth: 1,
+              callbacks: {
+                label: (context) => `${context.parsed.y.toFixed(2)} mm`
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                color: 'rgba(255, 255, 255, 0.05)'
+              },
+              ticks: {
+                color: '#666',
+                font: { size: 10 },
+                maxTicksLimit: 8
+              }
+            },
+            y: {
+              beginAtZero: true,
+              grid: {
+                color: 'rgba(255, 255, 255, 0.05)'
+              },
+              ticks: {
+                color: '#666',
+                font: { size: 10 },
+                callback: (value) => value + ' mm'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    /**
+     * Load Chart.js library dynamically if not already loaded.
+     * Returns a promise that resolves when Chart.js is ready.
+     */
+    _loadChartJs() {
+      return new Promise((resolve) => {
+        if (typeof Chart !== 'undefined') {
+          resolve();
+          return;
+        }
+
+        // Check if already loading
+        if (window._chartJsLoading) {
+          window._chartJsLoading.then(resolve);
+          return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+        script.async = true;
+
+        window._chartJsLoading = new Promise((res) => {
+          script.onload = () => {
+            res();
+            resolve();
+          };
+          script.onerror = () => {
+            console.error('[SSC] Failed to load Chart.js');
+            res();
+            resolve();
+          };
+        });
+
+        document.head.appendChild(script);
+      });
+    }
+
     // Render the panel
     render() {
       if (!this._systems.length) {
@@ -597,6 +770,7 @@ if (!window.SmartSprinklerControlPanel) {
         ${this.renderStyles()}
         <div class="sprinkler-panel">
           ${this.renderHeader()}
+          ${this._renderRainGraph()}
           ${this.renderZones()}
           ${this.renderSchedules()}
           ${this.renderWeather()}
@@ -608,6 +782,11 @@ if (!window.SmartSprinklerControlPanel) {
       `;
 
       this.attachEventListeners();
+
+      // Load Chart.js and initialize rain chart after DOM is ready
+      this._loadChartJs().then(() => {
+        setTimeout(() => this._initRainChart(), 50);
+      });
     }
 
     // Duration picker modal
