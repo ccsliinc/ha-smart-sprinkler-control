@@ -18,6 +18,8 @@ export class DataManager {
     this._systems = [];
     this._selectedSystem = null;
     this._unsubscribe = null;
+    this._connectionId = null;
+    this._lastUpdate = Date.now();
   }
 
   /**
@@ -54,10 +56,32 @@ export class DataManager {
   }
 
   /**
+   * Check if connection is healthy and re-subscribe if needed
+   * @returns {boolean} True if connection is healthy
+   */
+  async checkConnection() {
+    if (!this._hass || !this._hass.connection) {
+      console.warn('[SSC] No hass connection available');
+      return false;
+    }
+
+    // Check if connection ID changed (indicates reconnection)
+    const currentConnId = this._hass.connection.options?.auth?.access_token?.substring(0, 8) || 'unknown';
+    if (this._connectionId && this._connectionId !== currentConnId) {
+      console.log('[SSC] Connection changed, re-subscribing...');
+      await this.setupEventListeners();
+    }
+    this._connectionId = currentConnId;
+
+    return true;
+  }
+
+  /**
    * Handle state change events
    * @param {Object} event - State change event
    */
   _handleStateChange(event) {
+    this._lastUpdate = Date.now();
     const entityId = event.data?.entity_id;
     if (!entityId) return;
 
@@ -207,6 +231,14 @@ export class DataManager {
       rainDelayActive: attrs.rain_delay_active,
       rainDelayUntil: attrs.rain_delay_until,
     };
+  }
+
+  /**
+   * Get timestamp of last state update
+   * @returns {number} Timestamp in milliseconds
+   */
+  getLastUpdate() {
+    return this._lastUpdate;
   }
 
   /**

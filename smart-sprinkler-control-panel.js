@@ -234,6 +234,8 @@
       this._systems = [];
       this._selectedSystem = null;
       this._unsubscribe = null;
+      this._connectionId = null;
+      this._lastUpdate = Date.now();
     }
 
     /**
@@ -270,10 +272,32 @@
     }
 
     /**
+     * Check if connection is healthy and re-subscribe if needed
+     * @returns {boolean} True if connection is healthy
+     */
+    async checkConnection() {
+      if (!this._hass || !this._hass.connection) {
+        console.warn('[SSC] No hass connection available');
+        return false;
+      }
+
+      // Check if connection ID changed (indicates reconnection)
+      const currentConnId = this._hass.connection.options?.auth?.access_token?.substring(0, 8) || 'unknown';
+      if (this._connectionId && this._connectionId !== currentConnId) {
+        console.log('[SSC] Connection changed, re-subscribing...');
+        await this.setupEventListeners();
+      }
+      this._connectionId = currentConnId;
+
+      return true;
+    }
+
+    /**
      * Handle state change events
      * @param {Object} event - State change event
      */
     _handleStateChange(event) {
+      this._lastUpdate = Date.now();
       const entityId = event.data?.entity_id;
       if (!entityId) return;
 
@@ -426,6 +450,14 @@
     }
 
     /**
+     * Get timestamp of last state update
+     * @returns {number} Timestamp in milliseconds
+     */
+    getLastUpdate() {
+      return this._lastUpdate;
+    }
+
+    /**
      * Clean up resources
      */
     destroy() {
@@ -469,6 +501,7 @@
 
         // Countdown timer state
         this._countdownInterval = null;
+        this._healthCheckInterval = null;
         this._zoneStartTimes = new Map(); // Track when each zone started
 
         // Initialize modules
@@ -513,6 +546,7 @@
         this.loadSystemData();
         this.render();
         this._startCountdownTimer();
+        this._startHealthCheck();
       }
 
       disconnectedCallback() {
@@ -520,6 +554,7 @@
           delete window.smartSprinklerControlPanel;
         }
         this._stopCountdownTimer();
+        this._stopHealthCheck();
         this.dataManager.destroy();
       }
 
@@ -545,6 +580,56 @@
         if (this._countdownInterval) {
           clearInterval(this._countdownInterval);
           this._countdownInterval = null;
+        }
+      }
+
+      /**
+       * Start health check interval to detect stale connections
+       */
+      _startHealthCheck() {
+        if (this._healthCheckInterval) return;
+
+        this._healthCheckInterval = setInterval(async () => {
+          // Check if panel content is empty (black screen)
+          const content = this.innerHTML?.trim();
+          if (!content || content.length < 100) {
+            console.warn('[SSC] Panel appears empty, forcing re-render');
+            this.render();
+            return;
+          }
+
+          // Check connection health
+          const isHealthy = await this.dataManager.checkConnection();
+          if (!isHealthy) {
+            console.warn('[SSC] Connection unhealthy, attempting recovery');
+            if (this._hass) {
+              this.dataManager.setHass(this._hass);
+              await this.dataManager.setupEventListeners();
+              this.loadSystemData();
+            }
+            return;
+          }
+
+          // Check for stale data (no updates in 60s while zones running)
+          const zones = this.dataManager.getZones();
+          const hasRunningZone = zones.some(z => z.state === 'watering' || z.is_running);
+          const timeSinceUpdate = Date.now() - this.dataManager.getLastUpdate();
+
+          if (hasRunningZone && timeSinceUpdate > 60000) {
+            console.warn('[SSC] Data appears stale, re-subscribing');
+            await this.dataManager.setupEventListeners();
+            this.loadSystemData();
+          }
+        }, 30000); // Check every 30 seconds
+      }
+
+      /**
+       * Stop health check interval
+       */
+      _stopHealthCheck() {
+        if (this._healthCheckInterval) {
+          clearInterval(this._healthCheckInterval);
+          this._healthCheckInterval = null;
         }
       }
 

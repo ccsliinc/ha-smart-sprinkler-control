@@ -34,6 +34,7 @@ if (!window.SmartSprinklerControlPanel) {
 
       // Countdown timer state
       this._countdownInterval = null;
+      this._healthCheckInterval = null;
       this._zoneStartTimes = new Map(); // Track when each zone started
 
       // Initialize modules
@@ -78,6 +79,7 @@ if (!window.SmartSprinklerControlPanel) {
       this.loadSystemData();
       this.render();
       this._startCountdownTimer();
+      this._startHealthCheck();
     }
 
     disconnectedCallback() {
@@ -85,6 +87,7 @@ if (!window.SmartSprinklerControlPanel) {
         delete window.smartSprinklerControlPanel;
       }
       this._stopCountdownTimer();
+      this._stopHealthCheck();
       this.dataManager.destroy();
     }
 
@@ -110,6 +113,56 @@ if (!window.SmartSprinklerControlPanel) {
       if (this._countdownInterval) {
         clearInterval(this._countdownInterval);
         this._countdownInterval = null;
+      }
+    }
+
+    /**
+     * Start health check interval to detect stale connections
+     */
+    _startHealthCheck() {
+      if (this._healthCheckInterval) return;
+
+      this._healthCheckInterval = setInterval(async () => {
+        // Check if panel content is empty (black screen)
+        const content = this.innerHTML?.trim();
+        if (!content || content.length < 100) {
+          console.warn('[SSC] Panel appears empty, forcing re-render');
+          this.render();
+          return;
+        }
+
+        // Check connection health
+        const isHealthy = await this.dataManager.checkConnection();
+        if (!isHealthy) {
+          console.warn('[SSC] Connection unhealthy, attempting recovery');
+          if (this._hass) {
+            this.dataManager.setHass(this._hass);
+            await this.dataManager.setupEventListeners();
+            this.loadSystemData();
+          }
+          return;
+        }
+
+        // Check for stale data (no updates in 60s while zones running)
+        const zones = this.dataManager.getZones();
+        const hasRunningZone = zones.some(z => z.state === 'watering' || z.is_running);
+        const timeSinceUpdate = Date.now() - this.dataManager.getLastUpdate();
+
+        if (hasRunningZone && timeSinceUpdate > 60000) {
+          console.warn('[SSC] Data appears stale, re-subscribing');
+          await this.dataManager.setupEventListeners();
+          this.loadSystemData();
+        }
+      }, 30000); // Check every 30 seconds
+    }
+
+    /**
+     * Stop health check interval
+     */
+    _stopHealthCheck() {
+      if (this._healthCheckInterval) {
+        clearInterval(this._healthCheckInterval);
+        this._healthCheckInterval = null;
       }
     }
 
