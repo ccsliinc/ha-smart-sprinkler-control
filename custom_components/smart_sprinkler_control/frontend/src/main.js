@@ -39,6 +39,7 @@ if (!window.SmartSprinklerControlPanel) {
 
       // Rain chart state
       this._rainChart = null;
+      this._chartInitializing = false;
 
       // Initialize modules
       this.serviceClient = new ServiceClient(this._hass);
@@ -606,6 +607,8 @@ if (!window.SmartSprinklerControlPanel) {
           border-radius: 8px;
           padding: 16px;
           margin-bottom: 20px;
+          height: 180px;
+          box-sizing: border-box;
         ">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h3 style="margin: 0; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
@@ -613,27 +616,57 @@ if (!window.SmartSprinklerControlPanel) {
             </h3>
             <span id="rain-total" style="color: #888; font-size: 12px;">Total: 0.0 mm</span>
           </div>
-          <canvas id="rainChart" height="120"></canvas>
+          <div style="height: 120px; position: relative;">
+            <canvas id="rainChart"></canvas>
+          </div>
         </div>
       `;
     }
 
     /**
-     * Initialize the rain chart with mock data.
-     * Uses Chart.js to render a line graph of 24h rain accumulation.
+     * Get rain data from Home Assistant sensors or fall back to mock data.
+     * Looks for OpenWeatherMap rain sensors first.
      */
-    _initRainChart() {
-      const canvas = this.querySelector('#rainChart');
-      if (!canvas || typeof Chart === 'undefined') return;
-
-      // Destroy existing chart if any
-      if (this._rainChart) {
-        this._rainChart.destroy();
+    _getRainData() {
+      if (!this._hass) {
+        return this._getMockRainData();
       }
 
-      const ctx = canvas.getContext('2d');
+      // Look for OpenWeatherMap rain sensor
+      const rainSensorIds = Object.keys(this._hass.states).filter(id =>
+        id.includes('rain') && (id.includes('openweathermap') || id.includes('weather'))
+      );
 
-      // Generate mock data for last 24 hours (hourly readings)
+      // If no real sensor, use mock data
+      if (rainSensorIds.length === 0) {
+        console.log('[SSC] No rain sensor found, using mock data');
+        return this._getMockRainData();
+      }
+
+      // Try to get history from HA - for now, get current value
+      const rainSensor = rainSensorIds[0];
+      const currentRain = parseFloat(this._hass.states[rainSensor]?.state) || 0;
+
+      console.log('[SSC] Found rain sensor:', rainSensor, 'value:', currentRain);
+
+      // Build 24-hour data array with current value at the end
+      const now = new Date();
+      const labels = [];
+      const data = [];
+
+      for (let i = 23; i >= 0; i--) {
+        const hour = new Date(now - i * 60 * 60 * 1000);
+        labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+        data.push(i === 0 ? currentRain : 0);
+      }
+
+      return { labels, data, total: currentRain, source: rainSensor };
+    }
+
+    /**
+     * Generate mock rain data for testing/demo purposes.
+     */
+    _getMockRainData() {
       const now = new Date();
       const labels = [];
       const data = [];
@@ -643,22 +676,58 @@ if (!window.SmartSprinklerControlPanel) {
         const hour = new Date(now - i * 60 * 60 * 1000);
         labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
 
-        // Mock rain pattern - some rain in morning, clear afternoon
         let rain = 0;
         const h = hour.getHours();
         if (h >= 6 && h <= 9) {
-          rain = Math.random() * 2.5; // Morning rain
+          rain = Math.random() * 2.5;
         } else if (h >= 14 && h <= 16) {
-          rain = Math.random() * 0.5; // Light afternoon shower
+          rain = Math.random() * 0.5;
         }
         data.push(parseFloat(rain.toFixed(2)));
         total += rain;
       }
 
-      // Update total display
+      return { labels, data, total, source: 'mock' };
+    }
+
+    /**
+     * Initialize the rain chart with data from sensors or mock.
+     * Uses Chart.js to render a line graph of 24h rain accumulation.
+     */
+    _initRainChart() {
+      // Prevent multiple simultaneous initializations
+      if (this._chartInitializing) return;
+      this._chartInitializing = true;
+
+      // CRITICAL: Destroy existing chart first
+      if (this._rainChart) {
+        this._rainChart.destroy();
+        this._rainChart = null;
+      }
+
+      const canvas = this.querySelector('#rainChart');
+      if (!canvas || typeof Chart === 'undefined') {
+        this._chartInitializing = false;
+        return;
+      }
+
+      // Check if canvas already has a chart instance attached
+      const existingChart = Chart.getChart(canvas);
+      if (existingChart) {
+        existingChart.destroy();
+      }
+
+      const ctx = canvas.getContext('2d');
+
+      // Get rain data (real or mock)
+      const rainData = this._getRainData();
+      const { labels, data, total, source } = rainData;
+
+      // Update total display with source indicator
       const totalEl = this.querySelector('#rain-total');
       if (totalEl) {
-        totalEl.textContent = `Total: ${total.toFixed(1)} mm`;
+        const sourceLabel = source === 'mock' ? ' (mock)' : '';
+        totalEl.textContent = `Total: ${total.toFixed(1)} mm${sourceLabel}`;
       }
 
       this._rainChart = new Chart(ctx, {
@@ -720,6 +789,8 @@ if (!window.SmartSprinklerControlPanel) {
           }
         }
       });
+
+      this._chartInitializing = false;
     }
 
     /**
