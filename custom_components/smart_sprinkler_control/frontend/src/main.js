@@ -40,6 +40,10 @@ if (!window.SmartSprinklerControlPanel) {
       // Rain chart state
       this._rainChart = null;
       this._chartInitializing = false;
+      this._rainTestMode = false;
+
+      // Visibility change handler
+      this._visibilityHandler = null;
 
       // Initialize modules
       this.serviceClient = new ServiceClient(this._hass);
@@ -84,6 +88,34 @@ if (!window.SmartSprinklerControlPanel) {
       this.render();
       this._startCountdownTimer();
       this._startHealthCheck();
+
+      // Listen for tab visibility changes (handles sleep/wake)
+      this._visibilityHandler = () => {
+        if (document.visibilityState === 'visible') {
+          console.log('[SSC] Tab became visible, checking panel state...');
+          // Force reconnect and re-render
+          if (this._hass) {
+            this.dataManager.setHass(this._hass);
+            this.dataManager.setupEventListeners();
+          }
+          // Check if panel is empty/black
+          const content = this.innerHTML?.trim();
+          if (!content || content.length < 100 || !this.querySelector('.sprinkler-panel')) {
+            console.warn('[SSC] Panel empty after wake, forcing re-render');
+            this.render();
+          } else {
+            // Just refresh data
+            this.loadSystemData();
+          }
+          // Reinitialize chart if needed
+          setTimeout(() => {
+            if (!this._rainChart || !this.querySelector('#rainChart')) {
+              this._initRainChart();
+            }
+          }, 200);
+        }
+      };
+      document.addEventListener('visibilitychange', this._visibilityHandler);
     }
 
     disconnectedCallback() {
@@ -96,6 +128,11 @@ if (!window.SmartSprinklerControlPanel) {
       if (this._rainChart) {
         this._rainChart.destroy();
         this._rainChart = null;
+      }
+      // Clean up visibility handler
+      if (this._visibilityHandler) {
+        document.removeEventListener('visibilitychange', this._visibilityHandler);
+        this._visibilityHandler = null;
       }
       this.dataManager.destroy();
     }
@@ -600,6 +637,9 @@ if (!window.SmartSprinklerControlPanel) {
      * Shows last 24 hours of rain data.
      */
     _renderRainGraph() {
+      const modeLabel = this._rainTestMode ? 'TEST' : 'LIVE';
+      const modeColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
+
       return `
         <div class="rain-graph-container" style="
           background: rgba(0, 0, 0, 0.3);
@@ -614,7 +654,20 @@ if (!window.SmartSprinklerControlPanel) {
             <h3 style="margin: 0; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
               Rain Accumulation (24h)
             </h3>
-            <span id="rain-total" style="color: #888; font-size: 12px;">Total: 0.0 mm</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <button id="rain-mode-toggle" style="
+                background: transparent;
+                border: 1px solid ${modeColor};
+                color: ${modeColor};
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 10px;
+                cursor: pointer;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+              ">${modeLabel}</button>
+              <span id="rain-total" style="color: #888; font-size: 12px;">Total: 0.0 mm</span>
+            </div>
           </div>
           <div style="height: 120px; position: relative;">
             <canvas id="rainChart"></canvas>
@@ -628,6 +681,11 @@ if (!window.SmartSprinklerControlPanel) {
      * Looks for OpenWeatherMap rain sensors first.
      */
     _getRainData() {
+      // Check if test mode is enabled
+      if (this._rainTestMode) {
+        return this._getTestRainData();
+      }
+
       if (!this._hass) {
         return this._getMockRainData();
       }
@@ -691,6 +749,41 @@ if (!window.SmartSprinklerControlPanel) {
     }
 
     /**
+     * Generate deterministic test rain data for demo/testing purposes.
+     * Shows a realistic morning storm with afternoon drizzle pattern.
+     */
+    _getTestRainData() {
+      const now = new Date();
+      const labels = [];
+      const data = [];
+
+      // Realistic rain pattern: morning storm 6-10am with peak at 8am
+      // Light drizzle 2-4pm
+      const rainPattern = {
+        0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0.2,
+        6: 1.2, 7: 3.5, 8: 5.8, 9: 4.2, 10: 1.8,
+        11: 0.3, 12: 0, 13: 0, 14: 0.8, 15: 1.2,
+        16: 0.4, 17: 0, 18: 0, 19: 0, 20: 0,
+        21: 0, 22: 0, 23: 0
+      };
+
+      let total = 0;
+
+      for (let i = 23; i >= 0; i--) {
+        const hour = new Date(now - i * 60 * 60 * 1000);
+        const h = hour.getHours();
+        labels.push(h.toString().padStart(2, '0') + ':00');
+
+        const rain = rainPattern[h] || 0;
+        data.push(rain);
+        total += rain;
+      }
+
+      // Return total as number (toFixed returns string, parseFloat converts back)
+      return { labels, data, total: parseFloat(total.toFixed(1)), source: 'test' };
+    }
+
+    /**
      * Initialize the rain chart with data from sensors or mock.
      * Uses Chart.js to render a line graph of 24h rain accumulation.
      */
@@ -726,8 +819,9 @@ if (!window.SmartSprinklerControlPanel) {
       // Update total display with source indicator
       const totalEl = this.querySelector('#rain-total');
       if (totalEl) {
-        const sourceLabel = source === 'mock' ? ' (mock)' : '';
-        totalEl.textContent = `Total: ${total.toFixed(1)} mm${sourceLabel}`;
+        const totalNum = typeof total === 'number' ? total : parseFloat(total) || 0;
+        const sourceLabel = source === 'mock' ? ' (mock)' : source === 'test' ? ' (test)' : '';
+        totalEl.textContent = `Total: ${totalNum.toFixed(1)} mm${sourceLabel}`;
       }
 
       this._rainChart = new Chart(ctx, {
@@ -791,6 +885,20 @@ if (!window.SmartSprinklerControlPanel) {
       });
 
       this._chartInitializing = false;
+
+      // Setup toggle button handler
+      const toggleBtn = this.querySelector('#rain-mode-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          this._rainTestMode = !this._rainTestMode;
+          this._initRainChart();
+          const newLabel = this._rainTestMode ? 'TEST' : 'LIVE';
+          const newColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
+          toggleBtn.textContent = newLabel;
+          toggleBtn.style.borderColor = newColor;
+          toggleBtn.style.color = newColor;
+        });
+      }
     }
 
     /**
