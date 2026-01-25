@@ -1119,7 +1119,7 @@
         ">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h3 style="margin: 0; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-              Rain Accumulation (24h)
+              Rain Accumulation
             </h3>
             <div style="display: flex; align-items: center; gap: 12px;">
               <button id="rain-mode-toggle" style="
@@ -1133,7 +1133,8 @@
                 text-transform: uppercase;
                 letter-spacing: 1px;
               ">${modeLabel}</button>
-              <span id="rain-total" style="color: #888; font-size: 12px;">Total: 0.0 mm</span>
+              <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 mm</span>
+              <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 mm</span>
             </div>
           </div>
           <div style="height: 120px; position: relative;">
@@ -1153,66 +1154,93 @@
           return this._getTestRainData();
         }
 
-        if (!this._hass) {
-          return this._getMockRainData();
+        if (!this._hass || !this._hass.states) {
+          console.log('[SSC] No hass states available');
+          return this._getEmptyRainData('no hass');
         }
 
-        // Look for OpenWeatherMap rain sensor
-        const rainSensorIds = Object.keys(this._hass.states).filter(id =>
-          id.includes('rain') && (id.includes('openweathermap') || id.includes('weather'))
+        // Look for OpenWeatherMap rain sensor - try multiple patterns
+        const allStates = Object.keys(this._hass.states);
+        console.log('[SSC] Total entities in hass.states:', allStates.length);
+
+        // Find rain intensity sensors
+        const rainSensorIds = allStates.filter(id =>
+          id.includes('rain') && id.includes('openweathermap')
         );
 
-        // If no real sensor, use mock data
+        console.log('[SSC] Found rain sensors:', rainSensorIds);
+
+        // If no sensor found, return zeros (not mock) so user knows it's not working
         if (rainSensorIds.length === 0) {
-          console.log('[SSC] No rain sensor found, using mock data');
-          return this._getMockRainData();
+          console.warn('[SSC] No OpenWeatherMap rain sensor found. Available entities with "rain":',
+            allStates.filter(id => id.includes('rain')));
+          return this._getEmptyRainData('no sensor');
         }
 
-        // Try to get history from HA - for now, get current value
-        const rainSensor = rainSensorIds[0];
-        const currentRain = parseFloat(this._hass.states[rainSensor]?.state) || 0;
+        // Get the most recent rain sensor (prefer _2 version if exists)
+        const rainSensor = rainSensorIds.find(id => id.includes('_2')) || rainSensorIds[0];
+        const sensorState = this._hass.states[rainSensor];
+        const stateValue = sensorState?.state;
 
-        console.log('[SSC] Found rain sensor:', rainSensor, 'value:', currentRain);
+        console.log('[SSC] Using rain sensor:', rainSensor, 'state:', stateValue, 'attributes:', sensorState?.attributes);
 
-        // Build 24-hour data array with current value at the end
+        // Handle various state values
+        let currentRain = 0;
+        if (stateValue && stateValue !== 'unknown' && stateValue !== 'unavailable') {
+          currentRain = parseFloat(stateValue) || 0;
+        }
+
+        // Build 24-hour data array
+        // Since we don't have history API access from frontend, show current value for now
+        // TODO: Implement backend API to fetch HA history
         const now = new Date();
         const labels = [];
         const data = [];
+        let total24h = 0;
+        let todayTotal = 0;
 
         for (let i = 23; i >= 0; i--) {
           const hour = new Date(now - i * 60 * 60 * 1000);
-          labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
-          data.push(i === 0 ? currentRain : 0);
+          const h = hour.getHours();
+          labels.push(h.toString().padStart(2, '0') + ':00');
+
+          // Current hour gets the live reading, others are 0 (no history yet)
+          const rainValue = (i === 0) ? currentRain : 0;
+          data.push(rainValue);
+          total24h += rainValue;
+
+          // Calculate "today" (since midnight)
+          if (hour.getDate() === now.getDate()) {
+            todayTotal += rainValue;
+          }
         }
 
-        return { labels, data, total: currentRain, source: rainSensor };
+        return {
+          labels,
+          data,
+          total: parseFloat(total24h.toFixed(1)),
+          today: parseFloat(todayTotal.toFixed(1)),
+          source: rainSensor,
+          currentRate: currentRain
+        };
       }
 
       /**
-       * Generate mock rain data for testing/demo purposes.
+       * Generate empty rain data when no sensor is available.
+       * Shows zeros so user knows there's no data, rather than fake mock data.
        */
-      _getMockRainData() {
+      _getEmptyRainData(reason) {
         const now = new Date();
         const labels = [];
         const data = [];
-        let total = 0;
 
         for (let i = 23; i >= 0; i--) {
           const hour = new Date(now - i * 60 * 60 * 1000);
           labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
-
-          let rain = 0;
-          const h = hour.getHours();
-          if (h >= 6 && h <= 9) {
-            rain = Math.random() * 2.5;
-          } else if (h >= 14 && h <= 16) {
-            rain = Math.random() * 0.5;
-          }
-          data.push(parseFloat(rain.toFixed(2)));
-          total += rain;
+          data.push(0);
         }
 
-        return { labels, data, total, source: 'mock' };
+        return { labels, data, total: 0, today: 0, source: reason, currentRate: 0 };
       }
 
       /**
@@ -1235,6 +1263,7 @@
         };
 
         let total = 0;
+        let todayTotal = 0;
 
         for (let i = 23; i >= 0; i--) {
           const hour = new Date(now - i * 60 * 60 * 1000);
@@ -1244,10 +1273,21 @@
           const rain = rainPattern[h] || 0;
           data.push(rain);
           total += rain;
+
+          // Calculate "today" (hours that fall on current date)
+          if (hour.getDate() === now.getDate()) {
+            todayTotal += rain;
+          }
         }
 
-        // Return total as number (toFixed returns string, parseFloat converts back)
-        return { labels, data, total: parseFloat(total.toFixed(1)), source: 'test' };
+        return {
+          labels,
+          data,
+          total: parseFloat(total.toFixed(1)),
+          today: parseFloat(todayTotal.toFixed(1)),
+          source: 'test',
+          currentRate: rainPattern[now.getHours()] || 0
+        };
       }
 
       /**
@@ -1283,12 +1323,19 @@
         const rainData = this._getRainData();
         const { labels, data, total, source } = rainData;
 
-        // Update total display with source indicator
+        // Update displays
+        const todayEl = this.querySelector('#rain-today');
         const totalEl = this.querySelector('#rain-total');
+
+        if (todayEl) {
+          const todayNum = typeof rainData.today === 'number' ? rainData.today : parseFloat(rainData.today) || 0;
+          todayEl.textContent = `Today: ${todayNum.toFixed(1)} mm`;
+        }
+
         if (totalEl) {
           const totalNum = typeof total === 'number' ? total : parseFloat(total) || 0;
-          const sourceLabel = source === 'mock' ? ' (mock)' : source === 'test' ? ' (test)' : '';
-          totalEl.textContent = `Total: ${totalNum.toFixed(1)} mm${sourceLabel}`;
+          const sourceLabel = source === 'test' ? ' (test)' : source === 'no sensor' ? ' (no sensor)' : source === 'no hass' ? ' (no hass)' : '';
+          totalEl.textContent = `24h: ${totalNum.toFixed(1)} mm${sourceLabel}`;
         }
 
         this._rainChart = new Chart(ctx, {
