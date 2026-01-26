@@ -575,9 +575,9 @@
               this.loadSystemData();
             }
             // Reinitialize chart if needed
-            setTimeout(() => {
+            setTimeout(async () => {
               if (!this._rainChart || !this.querySelector('#rainChart')) {
-                this._initRainChart();
+                await this._initRainChart();
               }
             }, 200);
           }
@@ -1119,7 +1119,7 @@
         ">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <h3 style="margin: 0; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-              Rain Accumulation
+              Precipitation (24h)
             </h3>
             <div style="display: flex; align-items: center; gap: 12px;">
               <button id="rain-mode-toggle" style="
@@ -1145,84 +1145,62 @@
       }
 
       /**
-       * Get rain data from Home Assistant sensors or fall back to mock data.
-       * Looks for OpenWeatherMap rain sensors first.
+       * Get rain data from backend API which fetches Home Assistant history.
+       * Falls back to empty data on API errors.
        */
-      _getRainData() {
+      async _getRainData() {
         // Check if test mode is enabled
         if (this._rainTestMode) {
           return this._getTestRainData();
         }
 
-        if (!this._hass || !this._hass.states) {
-          console.log('[SSC] No hass states available');
+        if (!this._hass) {
+          console.log('[SSC] No hass available');
           return this._getEmptyRainData('no hass');
         }
 
-        // Look for OpenWeatherMap rain sensor - try multiple patterns
-        const allStates = Object.keys(this._hass.states);
-        console.log('[SSC] Total entities in hass.states:', allStates.length);
+        try {
+          // Fetch from backend API
+          const response = await fetch('/api/smart_sprinkler_control/precipitation');
 
-        // Find rain intensity sensors
-        const rainSensorIds = allStates.filter(id =>
-          id.includes('rain') && id.includes('openweathermap')
-        );
-
-        console.log('[SSC] Found rain sensors:', rainSensorIds);
-
-        // If no sensor found, return zeros (not mock) so user knows it's not working
-        if (rainSensorIds.length === 0) {
-          console.warn('[SSC] No OpenWeatherMap rain sensor found. Available entities with "rain":',
-            allStates.filter(id => id.includes('rain')));
-          return this._getEmptyRainData('no sensor');
-        }
-
-        // Get the most recent rain sensor (prefer _2 version if exists)
-        const rainSensor = rainSensorIds.find(id => id.includes('_2')) || rainSensorIds[0];
-        const sensorState = this._hass.states[rainSensor];
-        const stateValue = sensorState?.state;
-
-        console.log('[SSC] Using rain sensor:', rainSensor, 'state:', stateValue, 'attributes:', sensorState?.attributes);
-
-        // Handle various state values
-        let currentRain = 0;
-        if (stateValue && stateValue !== 'unknown' && stateValue !== 'unavailable') {
-          currentRain = parseFloat(stateValue) || 0;
-        }
-
-        // Build 24-hour data array
-        // Since we don't have history API access from frontend, show current value for now
-        // TODO: Implement backend API to fetch HA history
-        const now = new Date();
-        const labels = [];
-        const data = [];
-        let total24h = 0;
-        let todayTotal = 0;
-
-        for (let i = 23; i >= 0; i--) {
-          const hour = new Date(now - i * 60 * 60 * 1000);
-          const h = hour.getHours();
-          labels.push(h.toString().padStart(2, '0') + ':00');
-
-          // Current hour gets the live reading, others are 0 (no history yet)
-          const rainValue = (i === 0) ? currentRain : 0;
-          data.push(rainValue);
-          total24h += rainValue;
-
-          // Calculate "today" (since midnight)
-          if (hour.getDate() === now.getDate()) {
-            todayTotal += rainValue;
+          if (!response.ok) {
+            console.warn('[SSC] Precipitation API error:', response.status);
+            return this._getEmptyRainData('api error');
           }
-        }
 
-        return {
-          labels,
-          data,
-          total: parseFloat(total24h.toFixed(1)),
-          today: parseFloat(todayTotal.toFixed(1)),
-          source: rainSensor,
-          currentRate: currentRain
-        };
+          const data = await response.json();
+          console.log('[SSC] Precipitation data from API:', data);
+
+          if (data.error) {
+            console.warn('[SSC] API returned error:', data.error);
+            return this._getEmptyRainData(data.error);
+          }
+
+          // Convert API response to chart format
+          const labels = data.hourly.map(h => h.hour);
+          const chartData = data.hourly.map(h => h.total);
+
+          // Determine source label
+          const hasRain = data.sensors?.rain?.length > 0;
+          const hasSnow = data.sensors?.snow?.length > 0;
+          let source = 'live';
+          if (hasSnow && hasRain) source = 'live (rain+snow)';
+          else if (hasSnow) source = 'live (snow)';
+          else if (hasRain) source = 'live (rain)';
+
+          return {
+            labels,
+            data: chartData,
+            total: data.total_24h || 0,
+            today: data.today_total || 0,
+            source,
+            currentRate: chartData[chartData.length - 1] || 0
+          };
+
+        } catch (error) {
+          console.error('[SSC] Error fetching precipitation data:', error);
+          return this._getEmptyRainData('fetch error');
+        }
       }
 
       /**
@@ -1294,7 +1272,7 @@
        * Initialize the rain chart with data from sensors or mock.
        * Uses Chart.js to render a line graph of 24h rain accumulation.
        */
-      _initRainChart() {
+      async _initRainChart() {
         // Prevent multiple simultaneous initializations
         if (this._chartInitializing) return;
         this._chartInitializing = true;
@@ -1320,7 +1298,7 @@
         const ctx = canvas.getContext('2d');
 
         // Get rain data (real or mock)
-        const rainData = this._getRainData();
+        const rainData = await this._getRainData();
         const { labels, data, total, source } = rainData;
 
         // Update displays
@@ -1403,9 +1381,9 @@
         // Setup toggle button handler
         const toggleBtn = this.querySelector('#rain-mode-toggle');
         if (toggleBtn) {
-          toggleBtn.addEventListener('click', () => {
+          toggleBtn.addEventListener('click', async () => {
             this._rainTestMode = !this._rainTestMode;
-            this._initRainChart();
+            await this._initRainChart();
             const newLabel = this._rainTestMode ? 'TEST' : 'LIVE';
             const newColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
             toggleBtn.textContent = newLabel;
@@ -1478,7 +1456,7 @@
 
         // Load Chart.js and initialize rain chart after DOM is ready
         this._loadChartJs().then(() => {
-          setTimeout(() => this._initRainChart(), 50);
+          setTimeout(async () => await this._initRainChart(), 50);
         });
       }
 
