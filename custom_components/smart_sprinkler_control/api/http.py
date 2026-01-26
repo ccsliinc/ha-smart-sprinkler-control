@@ -7,6 +7,8 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
+from .precipitation import PrecipitationAPI
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -41,7 +43,8 @@ class SmartSprinklerControlFrontendView(HomeAssistantView):
 
             if not file_path.exists():
                 _LOGGER.error("Frontend file not found: %s", file_path)
-                return web.Response(text=f"File not found: {filename}", status=404)
+                msg = f"File not found: {filename}"
+                return web.Response(text=msg, status=404)
 
             content = await self.hass.async_add_executor_job(
                 lambda: file_path.read_text(encoding="utf-8")
@@ -72,6 +75,33 @@ class SmartSprinklerControlFrontendView(HomeAssistantView):
             return web.Response(text=f"Error serving file: {e}", status=500)
 
 
+class PrecipitationHistoryView(HomeAssistantView):
+    """View to serve precipitation history data."""
+
+    url = "/api/smart_sprinkler_control/precipitation"
+    name = "api:smart_sprinkler_control:precipitation"
+    requires_auth = False
+
+    def __init__(self, precip_api: PrecipitationAPI):
+        """Initialize the view.
+
+        Args:
+            precip_api: PrecipitationAPI instance
+        """
+        self._precip_api = precip_api
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Handle GET request for precipitation history.
+
+        Args:
+            request: HTTP request
+
+        Returns:
+            HTTP response with precipitation history data
+        """
+        return await self._precip_api.get_precipitation_history(request)
+
+
 async def async_register_http_views(hass: HomeAssistant) -> None:
     """Register HTTP views for Smart Sprinkler Control.
 
@@ -80,6 +110,11 @@ async def async_register_http_views(hass: HomeAssistant) -> None:
     """
     _LOGGER.debug("Registering Smart Sprinkler Control HTTP views")
     hass.http.register_view(SmartSprinklerControlFrontendView(hass))
+
+    # Register precipitation history API
+    precip_api = PrecipitationAPI(hass)
+    hass.http.register_view(PrecipitationHistoryView(precip_api))
+
     _LOGGER.info("Smart Sprinkler Control HTTP views registered")
 
 
