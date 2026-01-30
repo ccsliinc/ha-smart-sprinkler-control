@@ -41,6 +41,7 @@ if (!window.SmartSprinklerControlPanel) {
       this._rainChart = null;
       this._chartInitializing = false;
       this._rainTestMode = false;
+      this._manualRainMm = 0;
 
       // Visibility change handler
       this._visibilityHandler = null;
@@ -666,6 +667,29 @@ if (!window.SmartSprinklerControlPanel) {
                 text-transform: uppercase;
                 letter-spacing: 1px;
               ">${modeLabel}</button>
+              <button id="rain-add-btn" style="
+                background: transparent;
+                border: 1px solid #00ffff;
+                color: #00ffff;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 10px;
+                cursor: pointer;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+              ">+ 0.5in</button>
+              <button id="rain-reset-btn" style="
+                background: transparent;
+                border: 1px solid #ff4444;
+                color: #ff4444;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 10px;
+                cursor: pointer;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+              ">Reset</button>
+              <span id="rain-manual" style="color: #ffaa00; font-size: 11px; display: ${this._manualRainMm > 0 ? 'inline' : 'none'};">+${this._manualRainMm.toFixed(1)}mm</span>
               <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 mm</span>
               <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 mm</span>
             </div>
@@ -724,8 +748,8 @@ if (!window.SmartSprinklerControlPanel) {
         return {
           labels,
           data: chartData,
-          total: data.total_24h || 0,
-          today: data.today_total || 0,
+          total: (data.total_24h || 0) + this._manualRainMm,
+          today: (data.today_total || 0) + this._manualRainMm,
           source,
           currentRate: chartData[chartData.length - 1] || 0
         };
@@ -837,6 +861,7 @@ if (!window.SmartSprinklerControlPanel) {
       // Update displays
       const todayEl = this.querySelector('#rain-today');
       const totalEl = this.querySelector('#rain-total');
+      const manualEl = this.querySelector('#rain-manual');
 
       if (todayEl) {
         const todayNum = typeof rainData.today === 'number' ? rainData.today : parseFloat(rainData.today) || 0;
@@ -844,9 +869,14 @@ if (!window.SmartSprinklerControlPanel) {
       }
 
       if (totalEl) {
-        const totalNum = typeof total === 'number' ? total : parseFloat(total) || 0;
+        const totalNum = typeof rainData.total === 'number' ? rainData.total : parseFloat(rainData.total) || 0;
         const sourceLabel = source === 'test' ? ' (test)' : source === 'no sensor' ? ' (no sensor)' : source === 'no hass' ? ' (no hass)' : '';
         totalEl.textContent = `24h: ${totalNum.toFixed(1)} mm${sourceLabel}`;
+      }
+
+      if (manualEl) {
+        manualEl.style.display = this._manualRainMm > 0 ? 'inline' : 'none';
+        manualEl.textContent = `+${this._manualRainMm.toFixed(1)}mm`;
       }
 
       this._rainChart = new Chart(ctx, {
@@ -922,6 +952,26 @@ if (!window.SmartSprinklerControlPanel) {
           toggleBtn.textContent = newLabel;
           toggleBtn.style.borderColor = newColor;
           toggleBtn.style.color = newColor;
+        });
+      }
+
+      // Setup manual rain add button handler
+      const addBtn = this.querySelector('#rain-add-btn');
+      if (addBtn) {
+        addBtn.addEventListener('click', async () => {
+          this._manualRainMm += 12.7; // 0.5 inch = 12.7mm
+          console.log('[SSC] Manual rain added, total:', this._manualRainMm, 'mm');
+          await this._initRainChart();
+        });
+      }
+
+      // Setup manual rain reset button handler
+      const resetBtn = this.querySelector('#rain-reset-btn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+          this._manualRainMm = 0;
+          console.log('[SSC] Manual rain reset');
+          await this._initRainChart();
         });
       }
     }
