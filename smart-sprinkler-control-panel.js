@@ -1105,6 +1105,26 @@
        * Shows last 24 hours of rain data.
        */
       _renderRainGraph() {
+        /* TEMP-DISABLED 2026-05-20: precipitation widget poll/render off — flickered + "no precipitation sensors found".
+           Render a static placeholder instead of the LIVE/+0.5in/RESET card + #rainChart canvas so layout stays
+           valid and no buttons/canvas exist to retrigger fetches. Revert (delete this block, restore original
+           return below) when the precip data source is fixed. See deferred precip task. */
+        return `
+        <div class="rain-graph-container" style="
+          background: rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(0, 255, 255, 0.12);
+          border-radius: 8px;
+          padding: 16px;
+          margin-bottom: 20px;
+          box-sizing: border-box;
+        ">
+          <h3 style="margin: 0 0 4px; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
+            Precipitation (24h)
+          </h3>
+          <div style="color: #888; font-size: 12px;">Precipitation widget temporarily disabled.</div>
+        </div>
+      `;
+        /* eslint-disable no-unreachable */
         const modeLabel = this._rainTestMode ? 'TEST' : 'LIVE';
         const modeColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
 
@@ -1297,6 +1317,11 @@
        * Uses Chart.js to render a line graph of 24h rain accumulation.
        */
       async _initRainChart() {
+        /* TEMP-DISABLED 2026-05-20: precipitation widget poll/render off — flickered + "no precipitation sensors found".
+           Early-return kills the per-render fetch('/api/smart_sprinkler_control/precipitation') loop, the Chart.js
+           destroy/recreate flicker, and the main-thread churn that was starving zone Start button clicks.
+           Revert (delete this block) when the precip data source is fixed. See deferred precip task. */
+        return;
         // Prevent multiple simultaneous initializations
         if (this._chartInitializing) return;
         this._chartInitializing = true;
