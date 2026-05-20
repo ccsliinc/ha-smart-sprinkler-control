@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -478,6 +479,28 @@ def _get_system_from_entity_id(hass: HomeAssistant, entity_id: str) -> Sprinkler
                 _LOGGER.debug("Found system via entry search (entry_id=%s)", entry_id)
                 _dump_zone_config(system)
                 return system
+
+    # Fallback: resolve via the entity registry.
+    #
+    # The system is keyed internally by a name-derived slug
+    # (f"sensor.{name}"), but Home Assistant may assign the summary sensor
+    # a different actual entity_id (e.g. "..._2") when the base slug is
+    # already taken in the registry. In that case the slug-based lookups
+    # above miss. Map the *real* entity_id back to its owning config entry
+    # via the registry so callers can always reference the sensor's true
+    # entity_id.
+    registry = er.async_get(hass)
+    reg_entry = registry.async_get(entity_id)
+    if reg_entry and reg_entry.config_entry_id:
+        entry_data = hass.data[DOMAIN].get(reg_entry.config_entry_id)
+        if isinstance(entry_data, dict) and "system" in entry_data:
+            system = entry_data["system"]
+            _LOGGER.debug(
+                "Found system via entity registry (config_entry_id=%s)",
+                reg_entry.config_entry_id,
+            )
+            _dump_zone_config(system)
+            return system
 
     _LOGGER.error("System NOT FOUND for entity_id: %s", entity_id)
     return None
