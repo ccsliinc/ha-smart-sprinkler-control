@@ -40,9 +40,7 @@ _PRECIP_PATH = (
     / "api"
     / "precipitation.py"
 )
-_spec = importlib.util.spec_from_file_location(
-    "precipitation_under_test", _PRECIP_PATH
-)
+_spec = importlib.util.spec_from_file_location("precipitation_under_test", _PRECIP_PATH)
 precipitation = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(precipitation)
 discover_precipitation_sensors = precipitation.discover_precipitation_sensors

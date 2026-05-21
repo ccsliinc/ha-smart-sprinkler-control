@@ -504,6 +504,10 @@
         this._healthCheckInterval = null;
         this._zoneStartTimes = new Map(); // Track when each zone started
 
+        // Render guard: last computed signature of render-affecting state.
+        // null forces the first loadSystemData() to render.
+        this._renderSignature = null;
+
         // Rain chart state
         this._rainChart = null;
         this._chartInitializing = false;
@@ -811,9 +815,58 @@
         // Sync countdown tracking with backend state
         this._syncCountdownTracking();
 
+        // Render guard: HA pushes state updates many times per second. A full
+        // render rebuilds innerHTML (destroying/recreating the #rainChart canvas
+        // and causing flicker). Only do a full render when sprinkler-relevant
+        // data actually changed; otherwise let _updateCountdownDisplays() (driven
+        // by the 1s countdown timer) handle running-zone countdowns via targeted
+        // DOM updates. bypassCache=true is an explicit user action — always render.
         if (!this._modalOpen) {
-          this.requestUpdate();
+          const signature = this._computeRenderSignature();
+          if (bypassCache || signature !== this._renderSignature) {
+            this._renderSignature = signature;
+            this.requestUpdate();
+          }
         }
+      }
+
+      /**
+       * Compute a lightweight signature of the sprinkler-relevant state used by
+       * render(). Used to suppress redundant full re-renders on unrelated hass
+       * pushes. Excludes per-second countdown fields (remaining_time) since those
+       * are handled by _updateCountdownDisplays() without a full render.
+       * @returns {string} Stable signature of render-affecting state.
+       */
+      _computeRenderSignature() {
+        const sel = this._selectedSystem?.entity_id || '';
+        const systems = (this._systems || [])
+          .map(s => s.entity_id)
+          .sort()
+          .join(',');
+        const zones = this.dataManager.getZones().map(z => [
+          z.id,
+          z.state,
+          z.is_running ? 1 : 0,
+          z.enabled ? 1 : 0,
+          z.name,
+          z.watering_duration,
+          z.duration,
+        ]);
+        const schedules = this.dataManager.getSchedules().map(s => [
+          s.id,
+          s.enabled ? 1 : 0,
+          s.name,
+          s.next_run,
+        ]);
+        const weather = this.dataManager.getWeatherData() || {};
+        return JSON.stringify({
+          sel,
+          systems,
+          zones,
+          schedules,
+          rainDelayActive: weather.rainDelayActive,
+          rainDelayUntil: weather.rainDelayUntil,
+        });
       }
 
       /**
