@@ -10,6 +10,50 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
+# Device classes that identify a precipitation rate/amount sensor.
+# Modern OpenWeatherMap rain/snow sensors report "precipitation_intensity";
+# some integrations use the plain "precipitation" class.
+PRECIP_DEVICE_CLASSES = ("precipitation", "precipitation_intensity")
+
+
+def discover_precipitation_sensors(hass: HomeAssistant) -> tuple[list[str], list[str]]:
+    """Discover rain and snow precipitation sensors.
+
+    Primary match is by device_class (robust across integrations); a
+    name-based match (``openweathermap`` + ``intensity``) is kept as a
+    fallback for back-compat with the original brittle discovery.
+
+    Args:
+        hass: Home Assistant instance.
+
+    Returns:
+        Tuple of (rain_sensor_ids, snow_sensor_ids). Snow is classified
+        by "snow" appearing in the entity_id or friendly name; everything
+        else is treated as rain.
+    """
+    rain_sensors: list[str] = []
+    snow_sensors: list[str] = []
+
+    for eid in hass.states.async_entity_ids("sensor"):
+        state = hass.states.get(eid)
+        if state is None:
+            continue
+
+        device_class = state.attributes.get("device_class")
+        by_device_class = device_class in PRECIP_DEVICE_CLASSES
+        by_name = "openweathermap" in eid and "intensity" in eid
+
+        if not (by_device_class or by_name):
+            continue
+
+        name = str(state.attributes.get("friendly_name", "")).lower()
+        if "snow" in eid or "snow" in name:
+            snow_sensors.append(eid)
+        else:
+            rain_sensors.append(eid)
+
+    return rain_sensors, snow_sensors
+
 
 class PrecipitationAPI:
     """API for fetching precipitation history data."""
@@ -25,17 +69,7 @@ class PrecipitationAPI:
         intensity sensors.
         """
         try:
-            # Find precipitation sensors
-            rain_sensors = [
-                eid
-                for eid in self.hass.states.async_entity_ids()
-                if "rain" in eid and "openweathermap" in eid and "intensity" in eid
-            ]
-            snow_sensors = [
-                eid
-                for eid in self.hass.states.async_entity_ids()
-                if "snow" in eid and "openweathermap" in eid and "intensity" in eid
-            ]
+            rain_sensors, snow_sensors = discover_precipitation_sensors(self.hass)
 
             _LOGGER.debug("Found rain sensors: %s", rain_sensors)
             _LOGGER.debug("Found snow sensors: %s", snow_sensors)

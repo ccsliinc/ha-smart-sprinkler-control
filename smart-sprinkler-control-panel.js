@@ -507,8 +507,12 @@
         // Rain chart state
         this._rainChart = null;
         this._chartInitializing = false;
-        this._rainTestMode = false;
-        this._manualRainMm = 0;
+        // Throttled precipitation cache: fetch on load, then every 5 min.
+        this._rainData = null;        // last fetched/normalized data
+        this._rainLastFetch = 0;      // epoch ms of last successful fetch
+        this._rainFetchInterval = 5 * 60 * 1000; // 5 minutes
+        this._rainFetchInflight = null; // in-flight fetch promise (dedupe)
+        this._rainRefreshInterval = null; // background refresh timer handle
 
         // Visibility change handler
         this._visibilityHandler = null;
@@ -556,6 +560,7 @@
         this.render();
         this._startCountdownTimer();
         this._startHealthCheck();
+        this._startRainRefresh();
 
         // Listen for tab visibility changes (handles sleep/wake)
         this._visibilityHandler = () => {
@@ -592,6 +597,7 @@
         }
         this._stopCountdownTimer();
         this._stopHealthCheck();
+        this._stopRainRefresh();
         // Clean up rain chart
         if (this._rainChart) {
           this._rainChart.destroy();
@@ -627,6 +633,31 @@
         if (this._countdownInterval) {
           clearInterval(this._countdownInterval);
           this._countdownInterval = null;
+        }
+      }
+
+      /**
+       * Start the throttled precipitation refresh timer. Forces a cache
+       * refetch every _rainFetchInterval (5 min) and pushes new data into the
+       * existing chart via update() — it never rebuilds the chart, so it
+       * cannot cause flicker. Renders in between reuse the cached data.
+       */
+      _startRainRefresh() {
+        if (this._rainRefreshInterval) return;
+        this._rainRefreshInterval = setInterval(async () => {
+          if (document.visibilityState !== 'visible') return;
+          const data = await this._getCachedRainData(true);
+          this._applyRainData(data);
+        }, this._rainFetchInterval);
+      }
+
+      /**
+       * Stop the precipitation refresh timer.
+       */
+      _stopRainRefresh() {
+        if (this._rainRefreshInterval) {
+          clearInterval(this._rainRefreshInterval);
+          this._rainRefreshInterval = null;
         }
       }
 
@@ -1105,29 +1136,6 @@
        * Shows last 24 hours of rain data.
        */
       _renderRainGraph() {
-        /* TEMP-DISABLED 2026-05-20: precipitation widget poll/render off — flickered + "no precipitation sensors found".
-           Render a static placeholder instead of the LIVE/+0.5in/RESET card + #rainChart canvas so layout stays
-           valid and no buttons/canvas exist to retrigger fetches. Revert (delete this block, restore original
-           return below) when the precip data source is fixed. See deferred precip task. */
-        return `
-        <div class="rain-graph-container" style="
-          background: rgba(0, 0, 0, 0.3);
-          border: 1px solid rgba(0, 255, 255, 0.12);
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 20px;
-          box-sizing: border-box;
-        ">
-          <h3 style="margin: 0 0 4px; color: #00ffff; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">
-            Precipitation (24h)
-          </h3>
-          <div style="color: #888; font-size: 12px;">Precipitation widget temporarily disabled.</div>
-        </div>
-      `;
-        /* eslint-disable no-unreachable */
-        const modeLabel = this._rainTestMode ? 'TEST' : 'LIVE';
-        const modeColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
-
         return `
         <div class="rain-graph-container" style="
           background: rgba(0, 0, 0, 0.3);
@@ -1143,40 +1151,6 @@
               Precipitation (24h)
             </h3>
             <div style="display: flex; align-items: center; gap: 12px;">
-              <button id="rain-mode-toggle" style="
-                background: transparent;
-                border: 1px solid ${modeColor};
-                color: ${modeColor};
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 10px;
-                cursor: pointer;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-              ">${modeLabel}</button>
-              <button id="rain-add-btn" style="
-                background: transparent;
-                border: 1px solid #00ffff;
-                color: #00ffff;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 10px;
-                cursor: pointer;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-              ">+ 0.5in</button>
-              <button id="rain-reset-btn" style="
-                background: transparent;
-                border: 1px solid #ff4444;
-                color: #ff4444;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 10px;
-                cursor: pointer;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-              ">Reset</button>
-              <span id="rain-manual" style="color: #ffaa00; font-size: 11px; display: ${this._manualRainMm > 0 ? 'inline' : 'none'};">+${this._manualRainMm.toFixed(1)}mm</span>
               <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 mm</span>
               <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 mm</span>
             </div>
@@ -1193,11 +1167,6 @@
        * Falls back to empty data on API errors.
        */
       async _getRainData() {
-        // Check if test mode is enabled
-        if (this._rainTestMode) {
-          return this._getTestRainData();
-        }
-
         if (!this._hass) {
           console.log('[SSC] No hass available');
           return this._getEmptyRainData('no hass');
@@ -1235,8 +1204,8 @@
           return {
             labels,
             data: chartData,
-            total: (data.total_24h || 0) + this._manualRainMm,
-            today: (data.today_total || 0) + this._manualRainMm,
+            total: data.total_24h || 0,
+            today: data.today_total || 0,
             source,
             currentRate: chartData[chartData.length - 1] || 0
           };
@@ -1266,110 +1235,106 @@
       }
 
       /**
-       * Generate deterministic test rain data for demo/testing purposes.
-       * Shows a realistic morning storm with afternoon drizzle pattern.
+       * Return cached precipitation data, fetching from the backend only
+       * when the cache is stale (older than the throttle interval) or empty.
+       * Deduplicates concurrent callers via a shared in-flight promise so a
+       * burst of renders triggers at most one network request.
+       *
+       * @param {boolean} [force=false] Bypass the throttle and refetch now.
+       * @returns {Promise<Object>} Normalized rain data object.
        */
-      _getTestRainData() {
-        const now = new Date();
-        const labels = [];
-        const data = [];
-
-        // Realistic rain pattern: morning storm 6-10am with peak at 8am
-        // Light drizzle 2-4pm
-        const rainPattern = {
-          0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0.2,
-          6: 1.2, 7: 3.5, 8: 5.8, 9: 4.2, 10: 1.8,
-          11: 0.3, 12: 0, 13: 0, 14: 0.8, 15: 1.2,
-          16: 0.4, 17: 0, 18: 0, 19: 0, 20: 0,
-          21: 0, 22: 0, 23: 0
-        };
-
-        let total = 0;
-        let todayTotal = 0;
-
-        for (let i = 23; i >= 0; i--) {
-          const hour = new Date(now - i * 60 * 60 * 1000);
-          const h = hour.getHours();
-          labels.push(h.toString().padStart(2, '0') + ':00');
-
-          const rain = rainPattern[h] || 0;
-          data.push(rain);
-          total += rain;
-
-          // Calculate "today" (hours that fall on current date)
-          if (hour.getDate() === now.getDate()) {
-            todayTotal += rain;
-          }
+      async _getCachedRainData(force = false) {
+        const now = Date.now();
+        const fresh = this._rainData && (now - this._rainLastFetch) < this._rainFetchInterval;
+        if (fresh && !force) {
+          return this._rainData;
         }
-
-        return {
-          labels,
-          data,
-          total: parseFloat(total.toFixed(1)),
-          today: parseFloat(todayTotal.toFixed(1)),
-          source: 'test',
-          currentRate: rainPattern[now.getHours()] || 0
-        };
+        // Coalesce concurrent fetches.
+        if (this._rainFetchInflight) {
+          return this._rainFetchInflight;
+        }
+        this._rainFetchInflight = (async () => {
+          const data = await this._getRainData();
+          this._rainData = data;
+          this._rainLastFetch = Date.now();
+          this._rainFetchInflight = null;
+          return data;
+        })();
+        return this._rainFetchInflight;
       }
 
       /**
-       * Initialize the rain chart with data from sensors or mock.
-       * Uses Chart.js to render a line graph of 24h rain accumulation.
+       * Push the current cached dataset into the existing chart and refresh
+       * the summary labels. Does NOT create or destroy the chart.
+       *
+       * @param {Object} rainData Normalized rain data object.
+       */
+      _applyRainData(rainData) {
+        if (!rainData) return;
+        const { labels, data, total, source } = rainData;
+
+        const todayEl = this.querySelector('#rain-today');
+        const totalEl = this.querySelector('#rain-total');
+
+        if (todayEl) {
+          const todayNum = typeof rainData.today === 'number' ? rainData.today : parseFloat(rainData.today) || 0;
+          todayEl.textContent = `Today: ${todayNum.toFixed(1)} mm`;
+        }
+        if (totalEl) {
+          const totalNum = typeof total === 'number' ? total : parseFloat(total) || 0;
+          const sourceLabel = source === 'no sensor' ? ' (no sensor)' : source === 'no hass' ? ' (no hass)' : '';
+          totalEl.textContent = `24h: ${totalNum.toFixed(1)} mm${sourceLabel}`;
+        }
+
+        if (this._rainChart) {
+          this._rainChart.data.labels = labels;
+          this._rainChart.data.datasets[0].data = data;
+          this._rainChart.update();
+        }
+      }
+
+      /**
+       * Initialize the rain chart ONCE against the #rainChart canvas using the
+       * cached dataset. Subsequent renders reuse the same chart instance and
+       * only update its data (see _applyRainData) — the chart is never
+       * destroyed/recreated per render, which is what caused the old flicker
+       * loop. If the chart already exists for the live canvas, this just
+       * re-applies the cached data and returns.
        */
       async _initRainChart() {
-        /* TEMP-DISABLED 2026-05-20: precipitation widget poll/render off — flickered + "no precipitation sensors found".
-           Early-return kills the per-render fetch('/api/smart_sprinkler_control/precipitation') loop, the Chart.js
-           destroy/recreate flicker, and the main-thread churn that was starving zone Start button clicks.
-           Revert (delete this block) when the precip data source is fixed. See deferred precip task. */
-        return;
         // Prevent multiple simultaneous initializations
         if (this._chartInitializing) return;
+
+        const canvas = this.querySelector('#rainChart');
+        if (!canvas || typeof Chart === 'undefined') {
+          return;
+        }
+
+        // Fetch (throttled/cached) BEFORE deciding to rebuild, so we never
+        // fetch more than once per interval regardless of render frequency.
+        const rainData = await this._getCachedRainData();
+
+        // If a live chart already exists on this exact canvas, just update
+        // its data — no destroy/recreate. This is the flicker fix.
+        if (this._rainChart && this._rainChart.canvas === canvas) {
+          this._applyRainData(rainData);
+          return;
+        }
+
         this._chartInitializing = true;
 
-        // CRITICAL: Destroy existing chart first
+        // Canvas was replaced by a re-render: drop any stale instance.
         if (this._rainChart) {
           this._rainChart.destroy();
           this._rainChart = null;
         }
-
-        const canvas = this.querySelector('#rainChart');
-        if (!canvas || typeof Chart === 'undefined') {
-          this._chartInitializing = false;
-          return;
-        }
-
-        // Check if canvas already has a chart instance attached
         const existingChart = Chart.getChart(canvas);
         if (existingChart) {
           existingChart.destroy();
         }
 
         const ctx = canvas.getContext('2d');
-
-        // Get rain data (real or mock)
-        const rainData = await this._getRainData();
-        const { labels, data, total, source } = rainData;
-
-        // Update displays
-        const todayEl = this.querySelector('#rain-today');
-        const totalEl = this.querySelector('#rain-total');
-        const manualEl = this.querySelector('#rain-manual');
-
-        if (todayEl) {
-          const todayNum = typeof rainData.today === 'number' ? rainData.today : parseFloat(rainData.today) || 0;
-          todayEl.textContent = `Today: ${todayNum.toFixed(1)} mm`;
-        }
-
-        if (totalEl) {
-          const totalNum = typeof rainData.total === 'number' ? rainData.total : parseFloat(rainData.total) || 0;
-          const sourceLabel = source === 'test' ? ' (test)' : source === 'no sensor' ? ' (no sensor)' : source === 'no hass' ? ' (no hass)' : '';
-          totalEl.textContent = `24h: ${totalNum.toFixed(1)} mm${sourceLabel}`;
-        }
-
-        if (manualEl) {
-          manualEl.style.display = this._manualRainMm > 0 ? 'inline' : 'none';
-          manualEl.textContent = `+${this._manualRainMm.toFixed(1)}mm`;
-        }
+        const { labels, data } = rainData;
 
         this._rainChart = new Chart(ctx, {
           type: 'line',
@@ -1433,39 +1398,8 @@
 
         this._chartInitializing = false;
 
-        // Setup toggle button handler
-        const toggleBtn = this.querySelector('#rain-mode-toggle');
-        if (toggleBtn) {
-          toggleBtn.addEventListener('click', async () => {
-            this._rainTestMode = !this._rainTestMode;
-            await this._initRainChart();
-            const newLabel = this._rainTestMode ? 'TEST' : 'LIVE';
-            const newColor = this._rainTestMode ? '#ffaa00' : '#00ff00';
-            toggleBtn.textContent = newLabel;
-            toggleBtn.style.borderColor = newColor;
-            toggleBtn.style.color = newColor;
-          });
-        }
-
-        // Setup manual rain add button handler
-        const addBtn = this.querySelector('#rain-add-btn');
-        if (addBtn) {
-          addBtn.addEventListener('click', async () => {
-            this._manualRainMm += 12.7; // 0.5 inch = 12.7mm
-            console.log('[SSC] Manual rain added, total:', this._manualRainMm, 'mm');
-            await this._initRainChart();
-          });
-        }
-
-        // Setup manual rain reset button handler
-        const resetBtn = this.querySelector('#rain-reset-btn');
-        if (resetBtn) {
-          resetBtn.addEventListener('click', async () => {
-            this._manualRainMm = 0;
-            console.log('[SSC] Manual rain reset');
-            await this._initRainChart();
-          });
-        }
+        // Populate summary labels for the freshly created chart.
+        this._applyRainData(rainData);
       }
 
       /**
