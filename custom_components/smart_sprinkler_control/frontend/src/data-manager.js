@@ -1,10 +1,7 @@
 /**
- * DataManager - Manages sprinkler system data and state
- *
- * Handles loading, caching, and subscribing to sprinkler system state updates.
+ * DataManager - Manages sprinkler system data and state.
  */
-
-import { DOMAIN } from '../utils/Constants.js';
+import { DOMAIN } from './constants.js';
 
 export class DataManager {
   /**

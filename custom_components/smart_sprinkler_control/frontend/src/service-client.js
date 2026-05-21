@@ -1,10 +1,7 @@
 /**
- * ServiceClient - Handles communication with Home Assistant services
- *
- * Provides methods to call sprinkler control services through the HA websocket API.
+ * ServiceClient - Handles communication with Home Assistant services.
  */
-
-import { DOMAIN, SERVICES } from '../utils/Constants.js';
+import { DOMAIN, SERVICES } from './constants.js';
 
 export class ServiceClient {
   /**
