@@ -191,8 +191,8 @@ class PrecipitationAPI:
             return web.json_response(
                 {
                     "hourly": hourly_list,
-                    "today_total": round(today_total, 1),
-                    "total_24h": round(total_24h, 1),
+                    "today_total": round(today_total, 2),
+                    "total_24h": round(total_24h, 2),
                     "sensors": {"rain": rain_sensors, "snow": snow_sensors},
                 }
             )
