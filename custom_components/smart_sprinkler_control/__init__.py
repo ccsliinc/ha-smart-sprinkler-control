@@ -39,8 +39,35 @@ from .const import (
 )
 from .frontend.panel import async_register_panel, async_unregister_panel
 from .models.zone import SprinklerSchedule, SprinklerSystem
+from .services.weather_services import WeatherServices
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def _notify_sprinkler(hass: HomeAssistant, message: str, title: str) -> None:
+    """Send a sprinkler notification via the notify.sprinkler service.
+
+    Description:
+        Best-effort user notification for rain-driven decisions (skipped runs,
+        auto rain-delay changes). Failures are logged, never raised, so a
+        missing notify target can't break the coordinator cycle.
+    Inputs:
+        hass: Home Assistant instance.
+        message: Notification body.
+        title: Notification title.
+    Outputs:
+        None.
+    """
+    try:
+        await hass.services.async_call(
+            "notify",
+            "sprinkler",
+            {"message": message, "title": title},
+            blocking=False,
+        )
+    except Exception as e:  # noqa: BLE001 - notify target is optional
+        _LOGGER.debug("notify.sprinkler unavailable (%s): %s", e, message)
+
 
 # Storage version for persistent data
 STORAGE_VERSION = 1
@@ -344,6 +371,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Restore system settings
         if stored_data.get("rain_delay_active"):
             system.rain_delay_active = stored_data["rain_delay_active"]
+            # Preserve auto-vs-manual classification across restarts so an auto
+            # delay isn't promoted to a manual one (and vice-versa).
+            system.auto_rain_delay = bool(stored_data.get("auto_rain_delay", False))
         if stored_data.get("is_enabled") is not None:
             system.is_enabled = stored_data["is_enabled"]
 
@@ -511,6 +541,7 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
             "system_name": system.system_name,
             "is_enabled": system.is_enabled,
             "rain_delay_active": system.rain_delay_active,
+            "auto_rain_delay": system.auto_rain_delay,
             "zones": zones,
             "schedules": schedules,
         }
@@ -605,6 +636,23 @@ async def _trigger_state_update(hass: HomeAssistant, entity_id: str) -> None:
                 return
 
     _LOGGER.warning("Could not find coordinator for entity %s", entity_id)
+
+
+def _get_coordinator_for_system(
+    hass: HomeAssistant, system: SprinklerSystem
+) -> Optional["SprinklerDataUpdateCoordinator"]:
+    """Return the coordinator that owns the given system, or None.
+
+    Inputs:
+        hass: Home Assistant instance.
+        system: The sprinkler system whose coordinator is wanted.
+    Outputs:
+        The owning SprinklerDataUpdateCoordinator, or None if not found.
+    """
+    for entry_data in hass.data[DOMAIN].values():
+        if isinstance(entry_data, dict) and entry_data.get("system") is system:
+            return entry_data.get("coordinator")
+    return None
 
 
 async def _register_services(hass: HomeAssistant) -> None:
@@ -972,6 +1020,23 @@ async def _register_services(hass: HomeAssistant) -> None:
             _LOGGER.warning("Schedule %s has no zones", schedule_id)
             return
 
+        # Recent-rainfall gate: skip if 24h accumulation meets the schedule's
+        # rain_threshold (same logic as auto-trigger). Uses the coordinator's
+        # WeatherServices so the data source is shared.
+        coordinator = _get_coordinator_for_system(hass, system)
+        if coordinator is not None:
+            skip_rain, reason = await coordinator.weather.async_should_skip_schedule(
+                schedule
+            )
+            if skip_rain:
+                _LOGGER.info("Skipping schedule %s: %s", schedule_id, reason)
+                await _notify_sprinkler(
+                    hass,
+                    f"Skipped scheduled run for {schedule.name}: {reason}.",
+                    "Sprinkler Run Skipped",
+                )
+                return
+
         _LOGGER.info("=" * 60)
         _LOGGER.info("SCHEDULE RUN: %s (manual trigger)", schedule.name)
         _LOGGER.info("  Zones: %s", schedule.zone_ids)
@@ -1087,6 +1152,9 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator."""
         self.system = system
         self.entry = entry
+        # Rainfall-driven control: auto rain-delay (per cycle) and per-schedule
+        # rain-skip decisions both read real precip data through this service.
+        self.weather = WeatherServices(hass, system)
 
         super().__init__(
             hass,
@@ -1110,6 +1178,27 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Update system state (timers, rain delay expiry, etc.)
             self.system.update_system_state()
+
+            # Auto rain-delay: enable while it is currently raining, clear when
+            # it stops. Never clobbers a manual delay (handled in the model).
+            try:
+                result = await self.weather.async_evaluate_auto_rain_delay()
+                if result == "enabled":
+                    await _notify_sprinkler(
+                        self.hass,
+                        "Auto rain-delay enabled: rain detected, "
+                        "watering paused until it stops.",
+                        "Sprinkler Rain Delay",
+                    )
+                elif result == "cleared":
+                    await _notify_sprinkler(
+                        self.hass,
+                        "Auto rain-delay cleared: rain has stopped, "
+                        "scheduled watering resumed.",
+                        "Sprinkler Rain Delay",
+                    )
+            except Exception as e:  # noqa: BLE001 - never break the cycle
+                _LOGGER.warning("Auto rain-delay evaluation failed: %s", e)
 
             # Check for zones that were auto-stopped (were running, now idle)
             for zone_id, zone_data in active_zones_before.items():
@@ -1169,13 +1258,34 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                         not schedule.last_run_date
                         or schedule.last_run_date.date() != now.date()
                     ):
-                        # Check rain conditions
+                        # Check rain conditions.
+                        # 1) Manual (or active) rain-delay flag.
                         should_skip = False
                         if schedule.skip_if_rain and self.system.rain_delay_active:
                             should_skip = True
                             _LOGGER.info(
                                 "Skipping schedule %s due to rain delay", schedule.name
                             )
+
+                        # 2) Recent-rainfall threshold (independent of the
+                        #    rain-delay flag): skip if 24h accumulation meets
+                        #    the schedule's configured rain_threshold.
+                        if not should_skip:
+                            skip_rain, reason = (
+                                await self.weather.async_should_skip_schedule(schedule)
+                            )
+                            if skip_rain:
+                                should_skip = True
+                                _LOGGER.info(
+                                    "Skipping schedule %s: %s", schedule.name, reason
+                                )
+                                schedule.last_run_date = now
+                                await _notify_sprinkler(
+                                    self.hass,
+                                    f"Skipped scheduled run for {schedule.name}: "
+                                    f"{reason}.",
+                                    "Sprinkler Run Skipped",
+                                )
 
                         if not should_skip:
                             # Check if a schedule is already running

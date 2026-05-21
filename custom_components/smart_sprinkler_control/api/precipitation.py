@@ -2,6 +2,7 @@
 
 import logging
 from datetime import timedelta
+from typing import Any, Dict
 
 from aiohttp import web
 from homeassistant.components.recorder import get_instance
@@ -15,6 +16,161 @@ _LOGGER = logging.getLogger(__name__)
 # Modern OpenWeatherMap rain/snow sensors report "precipitation_intensity";
 # some integrations use the plain "precipitation" class.
 PRECIP_DEVICE_CLASSES = ("precipitation", "precipitation_intensity")
+
+# State values that mean "no usable reading" for a precipitation sensor.
+_INVALID_STATES = ("unknown", "unavailable", None)
+
+
+def _current_rain_rate(hass: HomeAssistant, rain_sensors: list[str]) -> float:
+    """Return the current combined rain intensity from rain sensors.
+
+    Description:
+        Reads the live state of each discovered rain sensor and sums their
+        instantaneous intensity (rate) values. Used to decide whether it is
+        *currently* raining (for auto rain-delay). Snow sensors are excluded
+        so snow does not trigger a rain delay.
+    Inputs:
+        hass: Home Assistant instance.
+        rain_sensors: Entity ids of rain intensity sensors.
+    Outputs:
+        float — summed current rain rate (sensor's native unit, mm/h or in/h);
+        0.0 when no valid readings.
+    """
+    total = 0.0
+    for eid in rain_sensors:
+        state = hass.states.get(eid)
+        if state is None or state.state in _INVALID_STATES:
+            continue
+        try:
+            total += float(state.state)
+        except (ValueError, TypeError):
+            continue
+    return round(total, 4)
+
+
+async def compute_precipitation_totals(hass: HomeAssistant) -> Dict[str, Any]:
+    """Compute precipitation accumulation totals and current rain rate.
+
+    Description:
+        Single source of truth for precipitation math. Discovers precip
+        sensors, integrates recorder intensity history into 24 hourly buckets
+        (rate * elapsed-hours), and sums them into ``today_total`` and
+        ``total_24h``. Also samples the live rain-sensor states for the current
+        rain rate. Both the HTTP history endpoint and the weather/rain-delay
+        services consume this so the displayed and gating numbers always match.
+    Inputs:
+        hass: Home Assistant instance.
+    Outputs:
+        dict with keys:
+            hourly: list[{hour, rain, snow, total}] (oldest first)
+            today_total: float (inches/mm since local midnight, 2dp)
+            total_24h: float (last-24h accumulation, 2dp)
+            current_rate: float (live combined rain intensity, 4dp)
+            sensors: {"rain": [...], "snow": [...]}
+    Example:
+        totals = await compute_precipitation_totals(hass)
+        if totals["total_24h"] >= 0.1: skip_watering()
+    """
+    rain_sensors, snow_sensors = discover_precipitation_sensors(hass)
+    all_sensors = rain_sensors + snow_sensors
+
+    current_rate = _current_rain_rate(hass, rain_sensors)
+
+    if not all_sensors:
+        return {
+            "hourly": [],
+            "today_total": 0.0,
+            "total_24h": 0.0,
+            "current_rate": current_rate,
+            "sensors": {"rain": rain_sensors, "snow": snow_sensors},
+        }
+
+    # ALL time handling uses HA's configured local timezone via dt_util so the
+    # recorder window, the hourly bucket labels, and the "today" cutoff share
+    # one consistent TZ. (The recorder normalizes tz-aware datetimes to UTC.)
+    end_time = dt_util.now()
+    start_time = end_time - timedelta(hours=24)
+
+    try:
+        recorder = get_instance(hass)
+        history = await recorder.async_add_executor_job(
+            get_significant_states,
+            hass,
+            start_time,
+            end_time,
+            all_sensors,
+            None,  # filters
+            True,  # include_start_time_state
+            True,  # significant_changes_only
+            False,  # no_attributes
+        )
+    except Exception as e:  # noqa: BLE001 - recorder may be unavailable in tests
+        _LOGGER.warning("Could not get history from recorder: %s", e)
+        history = {}
+
+    # Build 24 hourly buckets keyed by the date-aware local hour (truncated to
+    # the top of the hour). Keying by the full local datetime keeps today's
+    # 05:00 distinct from yesterday's 05:00 for a correct today_total.
+    current_hour = end_time.replace(minute=0, second=0, microsecond=0)
+    bucket_hours = [current_hour - timedelta(hours=23 - i) for i in range(24)]
+    hourly_data = {
+        hour_dt: {"rain": 0.0, "snow": 0.0, "total": 0.0} for hour_dt in bucket_hours
+    }
+
+    # Integrate intensity (mm/h or in/h) over time into accumulation.
+    for entity_id, states in history.items():
+        precip_type = "snow" if "snow" in entity_id else "rain"
+        prev_state = None
+        prev_time = None
+
+        for state in states:
+            try:
+                value = (
+                    float(state.state) if state.state not in _INVALID_STATES else 0.0
+                )
+            except (ValueError, TypeError):
+                value = 0.0
+
+            # Recorder stores last_updated in UTC; convert to local hour-of-day.
+            state_time = dt_util.as_local(state.last_updated)
+
+            if prev_state is not None and prev_time is not None:
+                duration_hours = (state_time - prev_time).total_seconds() / 3600
+                accumulation = prev_state * duration_hours
+                bucket = prev_time.replace(minute=0, second=0, microsecond=0)
+                if bucket in hourly_data:
+                    hourly_data[bucket][precip_type] += accumulation
+                    hourly_data[bucket]["total"] += accumulation
+
+            prev_state = value
+            prev_time = state_time
+
+    hourly_list = []
+    total_24h = 0.0
+    today_total = 0.0
+    midnight = dt_util.start_of_local_day()
+
+    for hour_dt in bucket_hours:
+        data = hourly_data[hour_dt]
+        hourly_list.append(
+            {
+                "hour": hour_dt.strftime("%H:00"),
+                "rain": round(data["rain"], 2),
+                "snow": round(data["snow"], 2),
+                "total": round(data["total"], 2),
+            }
+        )
+        total_24h += data["total"]
+        if hour_dt >= midnight:
+            today_total += data["total"]
+
+    return {
+        "hourly": hourly_list,
+        "today_total": round(today_total, 2),
+        "total_24h": round(total_24h, 2),
+        "current_rate": current_rate,
+        "sensors": {"rain": rain_sensors, "snow": snow_sensors},
+    }
 
 
 def discover_precipitation_sensors(hass: HomeAssistant) -> tuple[list[str], list[str]]:
@@ -67,16 +223,14 @@ class PrecipitationAPI:
         """Get precipitation history for the last 24 hours.
 
         Returns hourly precipitation totals from rain and snow
-        intensity sensors.
+        intensity sensors. Delegates the math to
+        ``compute_precipitation_totals`` so the endpoint and the rain-delay
+        services share a single source of truth.
         """
         try:
-            rain_sensors, snow_sensors = discover_precipitation_sensors(self.hass)
+            totals = await compute_precipitation_totals(self.hass)
 
-            _LOGGER.debug("Found rain sensors: %s", rain_sensors)
-            _LOGGER.debug("Found snow sensors: %s", snow_sensors)
-
-            all_sensors = rain_sensors + snow_sensors
-            if not all_sensors:
+            if not (totals["sensors"]["rain"] or totals["sensors"]["snow"]):
                 return web.json_response(
                     {
                         "error": "No precipitation sensors found",
@@ -86,114 +240,14 @@ class PrecipitationAPI:
                     }
                 )
 
-            # Get history for last 24 hours.
-            # ALL time handling uses HA's configured local timezone via
-            # dt_util so the recorder query window, the hourly bucket labels,
-            # and the "today" cutoff are computed in one consistent TZ.
-            # (The recorder accepts tz-aware datetimes and normalizes to UTC
-            # internally, so passing local-aware times is correct.)
-            end_time = dt_util.now()
-            start_time = end_time - timedelta(hours=24)
-
-            # Try to get history from recorder
-            try:
-                recorder = get_instance(self.hass)
-                history = await recorder.async_add_executor_job(
-                    get_significant_states,
-                    self.hass,
-                    start_time,
-                    end_time,
-                    all_sensors,
-                    None,  # filters
-                    True,  # include_start_time_state
-                    True,  # significant_changes_only
-                    False,  # no_attributes
-                )
-            except Exception as e:
-                _LOGGER.warning("Could not get history from recorder: %s", e)
-                history = {}
-
-            # Build 24 hourly buckets keyed by the *date-aware* local hour
-            # (truncated to the top of the hour). Keying by the full local
-            # datetime — rather than a bare "%H:00" string — keeps today's
-            # 05:00 distinct from yesterday's 05:00, which is required to
-            # compute today_total correctly near a day boundary.
-            local_now = end_time  # already local-aware (dt_util.now())
-            current_hour = local_now.replace(minute=0, second=0, microsecond=0)
-            # Oldest bucket first so the output reads chronologically.
-            bucket_hours = [current_hour - timedelta(hours=23 - i) for i in range(24)]
-            hourly_data = {
-                hour_dt: {"rain": 0, "snow": 0, "total": 0} for hour_dt in bucket_hours
-            }
-
-            # Calculate accumulation from history.
-            # Intensity is in mm/h (or in/h), so integrate rate over time.
-            for entity_id, states in history.items():
-                is_snow = "snow" in entity_id
-                precip_type = "snow" if is_snow else "rain"
-
-                prev_state = None
-                prev_time = None
-
-                for state in states:
-                    try:
-                        invalid = ("unknown", "unavailable", None)
-                        value = float(state.state) if state.state not in invalid else 0
-                    except (ValueError, TypeError):
-                        value = 0
-
-                    # Recorder stores last_updated in UTC; convert to HA's
-                    # local timezone so the bucket reflects local hour-of-day.
-                    state_time = dt_util.as_local(state.last_updated)
-
-                    if prev_state is not None and prev_time is not None:
-                        # Rate * duration (hours) = accumulation.
-                        elapsed = (state_time - prev_time).total_seconds()
-                        duration_hours = elapsed / 3600
-                        accumulation = prev_state * duration_hours
-
-                        # Bucket by the date-aware local hour of the interval
-                        # start. Skip intervals that fall outside the window.
-                        bucket = prev_time.replace(minute=0, second=0, microsecond=0)
-                        if bucket in hourly_data:
-                            hourly_data[bucket][precip_type] += accumulation
-                            hourly_data[bucket]["total"] += accumulation
-
-                    prev_state = value
-                    prev_time = state_time
-
-            # Convert to list format for frontend.
-            hourly_list = []
-            total_24h = 0
-            today_total = 0
-            # Local midnight (start of today in HA's configured TZ) so the
-            # today-window shares the same TZ as the bucket datetimes above.
-            midnight = dt_util.start_of_local_day()
-
-            for hour_dt in bucket_hours:
-                data = hourly_data[hour_dt]
-
-                hourly_list.append(
-                    {
-                        "hour": hour_dt.strftime("%H:00"),
-                        "rain": round(data["rain"], 2),
-                        "snow": round(data["snow"], 2),
-                        "total": round(data["total"], 2),
-                    }
-                )
-
-                total_24h += data["total"]
-
-                # Count toward today only if this bucket is on/after local midnight.
-                if hour_dt >= midnight:
-                    today_total += data["total"]
-
+            # current_rate is internal to gating decisions; the frontend
+            # contract is hourly/today_total/total_24h/sensors.
             return web.json_response(
                 {
-                    "hourly": hourly_list,
-                    "today_total": round(today_total, 2),
-                    "total_24h": round(total_24h, 2),
-                    "sensors": {"rain": rain_sensors, "snow": snow_sensors},
+                    "hourly": totals["hourly"],
+                    "today_total": totals["today_total"],
+                    "total_24h": totals["total_24h"],
+                    "sensors": totals["sensors"],
                 }
             )
 

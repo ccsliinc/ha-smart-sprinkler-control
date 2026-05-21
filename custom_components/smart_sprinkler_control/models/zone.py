@@ -202,6 +202,11 @@ class SprinklerSystem:
     is_enabled: bool = True
     rain_delay_active: bool = False
     rain_delay_end_time: Optional[datetime] = None
+    # True only when the active rain delay was set automatically by the
+    # weather/auto-rain logic. Distinct from a manual delay so auto-clear can
+    # never clear a delay the user set by hand, and the manual button always
+    # takes precedence over auto.
+    auto_rain_delay: bool = False
     weather_entity_id: Optional[str] = None
     rain_sensor_entity_id: Optional[str] = None
 
@@ -323,8 +328,31 @@ class SprinklerSystem:
 
         return stopped_any
 
-    def enable_rain_delay(self, hours: int = 24) -> None:
-        """Enable rain delay for specified hours."""
+    def enable_rain_delay(self, hours: int = 24, auto: bool = False) -> None:
+        """Enable rain delay for specified hours.
+
+        Description:
+            Activates rain delay, stops running zones, and marks scheduled
+            zones as rain_delayed.
+        Inputs:
+            hours: Duration of the delay in hours.
+            auto: True when set by the automatic weather logic. A *manual*
+                enable (auto=False) always clears the auto flag so the manual
+                delay takes precedence and won't be auto-cleared. An *auto*
+                enable never downgrades an existing manual delay to auto.
+        Outputs:
+            None.
+        """
+        # A manual request always wins: clear the auto flag. An auto request
+        # must not overwrite an existing manual delay.
+        if auto:
+            if self.rain_delay_active and not self.auto_rain_delay:
+                # Manual delay already in effect — leave it untouched.
+                return
+            self.auto_rain_delay = True
+        else:
+            self.auto_rain_delay = False
+
         self.rain_delay_active = True
         self.rain_delay_end_time = datetime.now() + timedelta(hours=hours)
 
@@ -336,23 +364,48 @@ class SprinklerSystem:
             if zone.state == "scheduled":
                 zone.state = "rain_delayed"
 
-        _LOGGER.info("Rain delay enabled for %d hours", hours)
+        _LOGGER.info(
+            "Rain delay enabled for %d hours (%s)",
+            hours,
+            "auto" if auto else "manual",
+        )
 
-    def disable_rain_delay(self) -> None:
-        """Disable rain delay."""
+    def disable_rain_delay(self, auto: bool = False) -> bool:
+        """Disable rain delay.
+
+        Description:
+            Clears the rain delay and restores rain_delayed zones to scheduled.
+        Inputs:
+            auto: True when called by the automatic weather logic. An auto
+                clear is a no-op when the active delay was set manually, so a
+                dry spell never cancels a delay the user set by hand.
+        Outputs:
+            bool — True if a delay was actually cleared, False if skipped.
+        """
+        if not self.rain_delay_active:
+            return False
+
+        # Auto-clear must never cancel a manually set delay.
+        if auto and not self.auto_rain_delay:
+            return False
+
         self.rain_delay_active = False
         self.rain_delay_end_time = None
+        self.auto_rain_delay = False
 
         # Restore rain delayed zones to scheduled
         for zone in self.zones.values():
             if zone.state == "rain_delayed":
                 zone.state = "scheduled"
 
-        _LOGGER.info("Rain delay disabled")
+        _LOGGER.info("Rain delay disabled (%s)", "auto" if auto else "manual")
+        return True
 
     def update_system_state(self) -> None:
         """Update system state and zone timers."""
-        # Check if rain delay should expire
+        # Check if rain delay should expire (timer-based expiry clears both
+        # auto and manual delays; force-clear via auto=False bypasses the
+        # manual-protection guard since the timer the user/auto set is up).
         if self.rain_delay_active and self.rain_delay_end_time:
             if datetime.now() >= self.rain_delay_end_time:
                 self.disable_rain_delay()

@@ -1,194 +1,148 @@
-"""Weather integration services for Smart Sprinkler Control."""
+"""Weather / rain-delay services for Smart Sprinkler Control.
+
+Connects real precipitation data (from ``api.precipitation``) to two watering
+behaviors:
+
+1. Auto-skip a scheduled run when recent rainfall (24h accumulation) meets or
+   exceeds the schedule's configured ``rain_threshold``.
+2. Auto rain-delay while it is *currently* raining, auto-clearing when the rain
+   stops — without ever clobbering a delay the user set manually.
+
+Weather-based duration adjustment is intentionally out of scope and is gated
+behind an off-by-default flag.
+"""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant
 
-from ..models.zone import SprinklerSystem
+from ..api.precipitation import compute_precipitation_totals
+from ..models.zone import SprinklerSchedule, SprinklerSystem
 
 _LOGGER = logging.getLogger(__name__)
 
+# Default 24h-accumulation threshold (inches) used when a schedule does not
+# specify its own rain_threshold. Mirrors DEFAULT_RAIN_THRESHOLD in const.
+DEFAULT_RAIN_THRESHOLD = 0.1
+
+# Minimum current rain intensity (sensor's native unit, e.g. mm/h) that counts
+# as "actively raining" for the auto rain-delay. Anything above 0 means rain is
+# falling now; a tiny floor guards against sensor noise / float dust.
+ACTIVE_RAIN_RATE_THRESHOLD = 0.0
+
+# How long an auto rain-delay lasts before its timer would expire on its own.
+# The auto logic re-evaluates every coordinator cycle and clears the delay as
+# soon as the rain stops, so this is just a safety ceiling.
+AUTO_RAIN_DELAY_HOURS = 24
+
 
 class WeatherServices:
-    """Service layer for weather-based sprinkler control."""
+    """Service layer for rainfall-driven sprinkler control."""
 
     def __init__(self, hass: HomeAssistant, sprinkler_system: SprinklerSystem):
-        """Initialize weather services."""
+        """Initialize weather services.
+
+        Inputs:
+            hass: Home Assistant instance.
+            sprinkler_system: The system whose rain delay this controls.
+        """
         self.hass = hass
         self.system = sprinkler_system
 
     async def check_weather_conditions(self) -> Dict[str, Any]:
-        """Check current weather conditions."""
-        weather_data = {
-            "rain_detected": False,
-            "rain_amount_24h": 0.0,
-            "temperature": None,
-            "humidity": None,
-            "conditions": "unknown",
-            "should_skip_watering": False,
-            "reason": None,
+        """Read current precipitation conditions from the precip data source.
+
+        Outputs:
+            dict with:
+                total_24h: float — accumulation over the last 24h.
+                today_total: float — accumulation since local midnight.
+                current_rate: float — live combined rain intensity.
+                rain_detected: bool — True when currently raining.
+                has_sensors: bool — whether any precip sensor was found.
+        """
+        totals = await compute_precipitation_totals(self.hass)
+        sensors = totals.get("sensors", {"rain": [], "snow": []})
+        has_sensors = bool(sensors.get("rain") or sensors.get("snow"))
+        current_rate = totals.get("current_rate", 0.0)
+
+        return {
+            "total_24h": totals.get("total_24h", 0.0),
+            "today_total": totals.get("today_total", 0.0),
+            "current_rate": current_rate,
+            "rain_detected": current_rate > ACTIVE_RAIN_RATE_THRESHOLD,
+            "has_sensors": has_sensors,
         }
 
-        # Check weather entity if configured
-        if self.system.weather_entity_id:
-            weather_entity = self.hass.states.get(self.system.weather_entity_id)
-            if weather_entity:
-                weather_data.update(await self._parse_weather_entity(weather_entity))
+    async def async_should_skip_schedule(
+        self, schedule: SprinklerSchedule
+    ) -> Tuple[bool, str]:
+        """Decide whether a scheduled run should be skipped due to recent rain.
 
-        # Check rain sensor if configured
-        if self.system.rain_sensor_entity_id:
-            rain_sensor = self.hass.states.get(self.system.rain_sensor_entity_id)
-            if rain_sensor:
-                weather_data.update(await self._parse_rain_sensor(rain_sensor))
+        Description:
+            Compares the configured per-schedule ``rain_threshold`` against the
+            last-24h precipitation accumulation. Independent of the rain-delay
+            flag (the caller still applies the manual rain-delay skip too).
+        Inputs:
+            schedule: The schedule about to run.
+        Outputs:
+            (skip: bool, reason: str). ``reason`` is empty when not skipping.
+        Example:
+            skip, why = await ws.async_should_skip_schedule(sched)
+            if skip: notify(why)
+        """
+        if not schedule.skip_if_rain:
+            return False, ""
 
-        # Determine if watering should be skipped
-        weather_data["should_skip_watering"] = await self._should_skip_watering(
-            weather_data
-        )
+        conditions = await self.check_weather_conditions()
+        if not conditions["has_sensors"]:
+            return False, ""
 
-        return weather_data
+        threshold = schedule.rain_threshold or DEFAULT_RAIN_THRESHOLD
+        total_24h = conditions["total_24h"]
 
-    async def _parse_weather_entity(self, weather_entity: State) -> Dict[str, Any]:
-        """Parse weather entity data."""
-        data: Dict[str, Any] = {}
-
-        try:
-            # Get basic weather information
-            if weather_entity.state:
-                data["conditions"] = weather_entity.state
-
-            # Get attributes
-            attrs = weather_entity.attributes
-            if "temperature" in attrs:
-                data["temperature"] = attrs["temperature"]
-            if "humidity" in attrs:
-                data["humidity"] = attrs["humidity"]
-
-            # Check for precipitation
-            if "precipitation" in attrs:
-                data["rain_amount_24h"] = float(attrs["precipitation"])
-                data["rain_detected"] = data["rain_amount_24h"] > 0.0
-
-            # Check for current conditions that indicate rain
-            rain_conditions = ["rainy", "pouring", "snowy", "storm", "thunderstorm"]
-            if data.get("conditions", "").lower() in rain_conditions:
-                data["rain_detected"] = True
-
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error parsing weather entity: %s", e)
-
-        return data
-
-    async def _parse_rain_sensor(self, rain_sensor: State) -> Dict[str, Any]:
-        """Parse rain sensor data."""
-        data: Dict[str, Any] = {}
-
-        try:
-            # Rain sensor is typically binary (on/off)
-            if rain_sensor.state in ["on", "wet", "true", "1"]:
-                data["rain_detected"] = True
-                data["reason"] = "Rain sensor activated"
-            elif rain_sensor.state in ["off", "dry", "false", "0"]:
-                data["rain_detected"] = False
-
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error parsing rain sensor: %s", e)
-
-        return data
-
-    async def _should_skip_watering(self, weather_data: Dict[str, Any]) -> bool:
-        """Determine if watering should be skipped based on weather."""
-        # Check if rain delay is already active
-        if self.system.rain_delay_active:
-            weather_data["reason"] = "Rain delay is active"
-            return True
-
-        # Check rain detection
-        if weather_data.get("rain_detected", False):
-            weather_data["reason"] = "Rain detected"
-            return True
-
-        # Check precipitation amount
-        rain_amount = weather_data.get("rain_amount_24h", 0.0)
-        if rain_amount > 0.1:  # Default threshold
-            weather_data["reason"] = f"Recent precipitation: {rain_amount} inches"
-            return True
-
-        # Check for rainy conditions
-        conditions = weather_data.get("conditions", "").lower()
-        if any(condition in conditions for condition in ["rain", "storm", "shower"]):
-            weather_data["reason"] = f"Weather conditions: {conditions}"
-            return True
-
-        return False
-
-    async def auto_enable_rain_delay(self, hours: int = 24) -> bool:
-        """Automatically enable rain delay based on weather conditions."""
-        weather_data = await self.check_weather_conditions()
-
-        if weather_data["should_skip_watering"]:
-            _LOGGER.info(
-                "Auto-enabling rain delay due to weather: %s", weather_data["reason"]
+        if total_24h >= threshold:
+            reason = (
+                f"{total_24h:.2f}in rain in last 24h " f"≥ {threshold:.2f}in threshold"
             )
-            self.system.enable_rain_delay(hours)
+            return True, reason
 
-            # Trigger sensor update
-            self.hass.async_create_task(self._trigger_sensor_update())
-            return True
+        return False, ""
 
-        return False
+    async def async_evaluate_auto_rain_delay(self) -> str:
+        """Enable/clear the auto rain-delay based on current rain intensity.
 
-    async def check_and_disable_rain_delay(self) -> bool:
-        """Check weather and disable rain delay if conditions are clear."""
-        if not self.system.rain_delay_active:
-            return False
+        Description:
+            Called every coordinator cycle. If it is currently raining and no
+            delay is active, enables an *auto* rain delay. If an *auto* delay is
+            active and the rain has stopped, clears it. Never touches a delay
+            the user set manually.
+        Outputs:
+            str — one of "enabled", "cleared", "noop" describing what happened.
+        """
+        conditions = await self.check_weather_conditions()
+        if not conditions["has_sensors"]:
+            return "noop"
 
-        weather_data = await self.check_weather_conditions()
+        raining_now = conditions["rain_detected"]
+        rate = conditions["current_rate"]
 
-        # Only disable if weather is clear
-        if not weather_data["should_skip_watering"]:
-            _LOGGER.info("Weather is clear, disabling rain delay")
-            self.system.disable_rain_delay()
-
-            # Trigger sensor update
-            self.hass.async_create_task(self._trigger_sensor_update())
-            return True
-
-        return False
-
-    async def adjust_watering_duration(self, base_duration: int) -> int:
-        """Adjust watering duration based on weather conditions."""
-        weather_data = await self.check_weather_conditions()
-
-        adjusted_duration = base_duration
-
-        # Reduce duration based on recent rain
-        rain_amount = weather_data.get("rain_amount_24h", 0.0)
-        if rain_amount > 0.05:  # Small amount of rain
-            reduction = min(50, int(rain_amount * 100))  # Max 50% reduction
-            adjusted_duration = max(5, int(base_duration * (100 - reduction) / 100))
-            _LOGGER.info(
-                "Reduced watering duration by %d%% due to recent rain", reduction
-            )
-
-        # Increase duration for hot, dry conditions
-        temperature = weather_data.get("temperature")
-        humidity = weather_data.get("humidity")
-
-        if temperature and temperature > 85:  # Hot weather
-            if humidity and humidity < 30:  # Low humidity
-                increase = min(50, int((temperature - 85) * 2))  # Max 50% increase
-                adjusted_duration = int(base_duration * (100 + increase) / 100)
+        if raining_now:
+            # Only enable if nothing is already delaying. enable_rain_delay with
+            # auto=True is a no-op when a manual delay is already active.
+            if not self.system.rain_delay_active:
+                self.system.enable_rain_delay(AUTO_RAIN_DELAY_HOURS, auto=True)
                 _LOGGER.info(
-                    "Increased watering duration by %d%% due to hot, dry conditions",
-                    increase,
+                    "Auto rain-delay ENABLED: currently raining (%.3f intensity)",
+                    rate,
                 )
+                return "enabled"
+            return "noop"
 
-        return adjusted_duration
-
-    async def _trigger_sensor_update(self) -> None:
-        """Trigger update of the sensor entity."""
-        # This will be implemented when sensor is fully set up
-        # For now, just update the system state
-        self.system.update_system_state()
+        # Not raining now: clear ONLY an auto delay (manual is protected).
+        if self.system.rain_delay_active and self.system.auto_rain_delay:
+            cleared = self.system.disable_rain_delay(auto=True)
+            if cleared:
+                _LOGGER.info("Auto rain-delay CLEARED: rain has stopped")
+                return "cleared"
+        return "noop"
