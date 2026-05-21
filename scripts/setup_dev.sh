@@ -37,7 +37,7 @@ pre-commit install
 if [ -d "custom_components/device_manager/frontend" ]; then
     echo "🎨 Setting up frontend..."
     cd custom_components/device_manager/frontend
-    
+
     # Check if Node.js is available
     if command -v node >/dev/null 2>&1; then
         echo "📦 Installing Node.js dependencies..."
@@ -48,7 +48,7 @@ if [ -d "custom_components/device_manager/frontend" ]; then
         echo "⚠️ Node.js not found. Frontend build skipped."
         echo "   Install Node.js 18+ to build the frontend components."
     fi
-    
+
     cd - > /dev/null
 fi
 

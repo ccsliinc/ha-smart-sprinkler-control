@@ -6,14 +6,14 @@ Professional Home Assistant integration for intelligent sprinkler and irrigation
 
 ## 🌟 **Features**
 
-✅ **Zero Sensor Pollution**: Single comprehensive sensor with rich attributes instead of dozens of individual sensors  
-✅ **Smart Weather Integration**: Automatic rain delay and duration adjustment based on weather conditions  
-✅ **Advanced Scheduling**: Create complex watering schedules with per-zone duration control  
-✅ **Zone Management**: Individual zone control with flow rate tracking and water usage statistics  
-✅ **Professional UI**: Modern frontend panel with real-time status and controls  
-✅ **Rain Delay System**: Manual and automatic rain delay with configurable duration  
-✅ **Water Usage Tracking**: Daily and weekly statistics for each zone and system total  
-✅ **HACS Ready**: Easy installation through Home Assistant Community Store  
+✅ **Zero Sensor Pollution**: Single comprehensive sensor with rich attributes instead of dozens of individual sensors
+✅ **Smart Weather Integration**: Automatic rain delay and duration adjustment based on weather conditions
+✅ **Advanced Scheduling**: Create complex watering schedules with per-zone duration control
+✅ **Zone Management**: Individual zone control with flow rate tracking and water usage statistics
+✅ **Professional UI**: Modern frontend panel with real-time status and controls
+✅ **Rain Delay System**: Manual and automatic rain delay with configurable duration
+✅ **Water Usage Tracking**: Daily and weekly statistics for each zone and system total
+✅ **HACS Ready**: Easy installation through Home Assistant Community Store
 
 ---
 

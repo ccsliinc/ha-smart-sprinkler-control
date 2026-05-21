@@ -67,11 +67,10 @@ repos:
   - repo: https://github.com/jendrikseipp/vulture
     rev: v2.14
     hooks:
+      # The vulture hook uses pass_filenames: false; scan paths and settings
+      # (paths, exclude, min_confidence) come from [tool.vulture] in
+      # pyproject.toml rather than CLI args.
       - id: vulture
-        args:
-          - --min-confidence=60
-          - --exclude=tests,venv,config
-        files: ^custom_components/.+\.py$
 
   - repo: local
     hooks:
@@ -82,7 +81,7 @@ repos:
         args:
           - -c
           - |
-            if grep -r "TODO" custom_components/device_manager/ --include="*.py" --exclude-dir=tests --exclude-dir=scripts; then
+            if grep -r "TODO" custom_components/smart_sprinkler_control/ --include="*.py" --exclude-dir=tests --exclude-dir=scripts; then
               echo "❌ Found TODO comments in production code. Please create GitHub issues instead."
               exit 1
             fi
@@ -96,7 +95,7 @@ repos:
           - -c
           - |
             import json
-            with open('custom_components/device_manager/manifest.json') as f:
+            with open('custom_components/smart_sprinkler_control/manifest.json') as f:
                 manifest = json.load(f)
             required_keys = ['domain', 'name', 'version', 'codeowners', 'documentation', 'issue_tracker']
             missing = [k for k in required_keys if k not in manifest]
@@ -105,4 +104,4 @@ repos:
                 exit(1)
             print('✅ Manifest validation passed')
         pass_filenames: false
-        files: custom_components/device_manager/manifest.json
+        files: custom_components/smart_sprinkler_control/manifest.json

@@ -1,17 +1,19 @@
 """Smart Sprinkler Manager sensor platform."""
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
 from .const import DOMAIN
-from .models.zone import SprinklerSystem
+from .models.zone import SprinklerSystem, Zone
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,25 +38,25 @@ async def async_setup_entry(
         return
 
     sensor = SmartSprinklerManagerSensor(
-        coordinator=coordinator,
-        system=system,
-        config_entry=config_entry
+        coordinator=coordinator, system=system, config_entry=config_entry
     )
 
     async_add_entities([sensor], True)
 
 
 class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
-    """Backend-driven summary sensor with rich attributes - Zero Sensor Pollution Architecture.
+    """Backend-driven summary sensor - Zero Sensor Pollution Architecture.
 
-    Inherits from CoordinatorEntity for automatic state updates when coordinator refreshes.
+    Exposes the whole system as a single sensor with rich attributes.
+    Inherits from CoordinatorEntity for automatic state updates when the
+    coordinator refreshes.
     """
 
     _attr_has_entity_name = True
 
     def __init__(
         self,
-        coordinator,
+        coordinator: DataUpdateCoordinator,
         system: SprinklerSystem,
         config_entry: ConfigEntry,
     ) -> None:
@@ -70,7 +72,8 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
 
         self._config_entry = config_entry
 
-        # Use the system object from __init__.py (already has zones configured with switch entities)
+        # Use the system object from __init__.py (zones already configured
+        # with their switch entities).
         self._system_data = system
         self._system_name = system.system_name
 
@@ -80,7 +83,8 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
         self._attr_attribution = "Smart Sprinkler Control"
 
         _LOGGER.info(
-            "Initialized Smart Sprinkler Manager sensor: %s (CoordinatorEntity for instant updates)",
+            "Initialized Smart Sprinkler Manager sensor: %s "
+            "(CoordinatorEntity for instant updates)",
             system.system_name,
         )
 
@@ -116,18 +120,18 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
         """Calculate the current state - ALL LOGIC IN BACKEND."""
         if not self._system_data.is_enabled:
             return "disabled"
-        
+
         if self._system_data.rain_delay_active:
             return "rain_delayed"
-        
+
         active_zones = self._system_data.get_active_zones()
         if active_zones:
             return f"watering_{len(active_zones)}_zones"
-        
+
         scheduled_zones = self._system_data.get_scheduled_zones()
         if scheduled_zones:
             return f"scheduled_{len(scheduled_zones)}_zones"
-        
+
         return "idle"
 
     def _calculate_attributes(self) -> Dict[str, Any]:
@@ -139,14 +143,16 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
         """
         # Get system summary (read-only - do NOT call update_system_state here!)
         summary = self._system_data.get_system_summary()
-        
+
         # Add detailed zone information
         zone_details = {}
         for zone_id, zone in self._system_data.zones.items():
             # Calculate current watering duration (total minutes for this session)
             watering_duration = 0
             if zone.is_watering() and zone.start_time and zone.end_time:
-                watering_duration = int((zone.end_time - zone.start_time).total_seconds() / 60)
+                watering_duration = int(
+                    (zone.end_time - zone.start_time).total_seconds() / 60
+                )
 
             zone_details[str(zone_id)] = {
                 "name": zone.settings.name,
@@ -156,11 +162,15 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
                 "flow_rate": zone.settings.flow_rate,
                 "area_sqft": zone.settings.area_sqft,
                 "remaining_time": zone.remaining_duration,
-                "watering_duration": watering_duration,  # Total duration of current watering session
+                # Total duration of the current watering session (minutes).
+                "watering_duration": watering_duration,
                 "runtime_today": zone.total_runtime_today,
                 "water_used_today": round(zone.total_water_used_today, 2),
-                "last_run": zone.last_watering_date.isoformat() if zone.last_watering_date else None,
-
+                "last_run": (
+                    zone.last_watering_date.isoformat()
+                    if zone.last_watering_date
+                    else None
+                ),
                 # Backend-calculated display properties
                 "display_title": self._get_zone_display_title(zone),
                 "status_color": self._get_zone_status_color(zone),
@@ -168,7 +178,7 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
                 "can_start": zone.can_start(),
                 "is_running": zone.is_watering(),
             }
-        
+
         # Add schedule information
         schedule_details = {}
         for schedule_id, schedule in self._system_data.schedules.items():
@@ -181,14 +191,21 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
                 "zone_durations": schedule.zone_durations,
                 "zone_count": len(schedule.zone_ids),
                 "skip_if_rain": schedule.skip_if_rain,
-                "next_run": schedule.next_run_date.isoformat() if schedule.next_run_date else None,
-                "last_run": schedule.last_run_date.isoformat() if schedule.last_run_date else None,
-
+                "next_run": (
+                    schedule.next_run_date.isoformat()
+                    if schedule.next_run_date
+                    else None
+                ),
+                "last_run": (
+                    schedule.last_run_date.isoformat()
+                    if schedule.last_run_date
+                    else None
+                ),
                 # Backend-calculated display properties
                 "is_active_today": schedule.is_active_today(),
                 "should_run_now": schedule.should_run_now(),
             }
-        
+
         # Combine all attributes
         attributes = {
             # Marker for frontend to identify this entity
@@ -203,17 +220,25 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
             },
             "statistics": {
                 "total_schedules": len(self._system_data.schedules),
-                "enabled_schedules": len([s for s in self._system_data.schedules.values() if s.enabled]),
-                "zones_watered_today": len([z for z in self._system_data.zones.values() if z.total_runtime_today > 0]),
-            }
+                "enabled_schedules": len(
+                    [s for s in self._system_data.schedules.values() if s.enabled]
+                ),
+                "zones_watered_today": len(
+                    [
+                        z
+                        for z in self._system_data.zones.values()
+                        if z.total_runtime_today > 0
+                    ]
+                ),
+            },
         }
 
         return attributes
 
-    def _get_zone_display_title(self, zone) -> str:
+    def _get_zone_display_title(self, zone: Zone) -> str:
         """Get backend-calculated display title for zone."""
         base_title = f"Zone {zone.zone_id}: {zone.settings.name}"
-        
+
         if zone.is_watering() and zone.remaining_duration > 0:
             return f"{base_title} ({zone.remaining_duration}m remaining)"
         elif zone.state == "scheduled":
@@ -225,7 +250,7 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
         else:
             return base_title
 
-    def _get_zone_status_color(self, zone) -> str:
+    def _get_zone_status_color(self, zone: Zone) -> str:
         """Get backend-calculated status color for zone."""
         if not zone.settings.enabled:
             return "#9e9e9e"  # Grey - disabled
@@ -238,7 +263,7 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
         else:
             return "#757575"  # Light grey - idle
 
-    def _get_zone_status_text(self, zone) -> str:
+    def _get_zone_status_text(self, zone: Zone) -> str:
         """Get backend-calculated status text for zone."""
         if not zone.settings.enabled:
             return "Disabled"
@@ -254,4 +279,4 @@ class SmartSprinklerManagerSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return self.coordinator.last_update_success
+        return bool(self.coordinator.last_update_success)

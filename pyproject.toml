@@ -109,6 +109,15 @@ exclude_dirs = ["tests", "venv"]
 skips = ["B101"]  # Skip assert_used test
 
 [tool.vulture]
-exclude = ["venv/", "build/", "dist/"]
-ignore_decorators = ["@register", "@callback"]
-min_confidence = 60
+# Paths Vulture scans. The pre-commit hook sets pass_filenames: false and
+# expects the scan targets here (not on the command line).
+paths = ["custom_components"]
+exclude = ["venv/", "build/", "dist/", "tests/"]
+ignore_decorators = ["@register", "@callback", "@staticmethod", "@property"]
+# Home Assistant calls many symbols dynamically (entry points like
+# async_setup_entry, HomeAssistantView class attrs, config-flow steps) and the
+# const.py names form the public service/attribute contract consumed by
+# services.yaml and the frontend JS by string. All of those surface at
+# Vulture's 60% bucket as false positives, so require >60% confidence to keep
+# the hook actionable without deleting live, framework-driven code.
+min_confidence = 70

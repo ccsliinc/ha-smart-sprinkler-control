@@ -1,5 +1,7 @@
 """Constants for Smart Sprinkler Control."""
 
+import logging
+
 DOMAIN = "smart_sprinkler_control"
 VERSION = "1.0.0"
 ISSUE_URL = "https://github.com/ccsliinc/ha-smart-sprinkler-control"
@@ -70,7 +72,5 @@ ZONE_STATE_ERROR = "error"
 SCHEDULE_TYPE_DAILY = "daily"
 SCHEDULE_TYPE_WEEKLY = "weekly"
 SCHEDULE_TYPE_CUSTOM = "custom"
-
-import logging
 
 _LOGGER = logging.getLogger(__name__)

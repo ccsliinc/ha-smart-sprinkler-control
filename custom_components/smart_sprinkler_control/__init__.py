@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Optional, cast
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -18,7 +18,6 @@ from .api.http import async_register_http_views, async_unregister_http_views
 from .const import (
     ATTR_DURATION,
     ATTR_SCHEDULE_ID,
-    ATTR_ZONE_COUNT,
     ATTR_ZONE_ID,
     CONF_RAIN_SENSOR_ENTITY,
     CONF_SYSTEM_NAME,
@@ -35,12 +34,11 @@ from .const import (
     SERVICE_START_ZONE,
     SERVICE_STOP_ALL_ZONES,
     SERVICE_STOP_ZONE,
-    SERVICE_UPDATE_SYSTEM_SETTINGS,
     SERVICE_UPDATE_ZONE_SETTINGS,
     VERSION,
 )
 from .frontend.panel import async_register_panel, async_unregister_panel
-from .models.zone import SprinklerSchedule, SprinklerSystem, ZoneSettings
+from .models.zone import SprinklerSchedule, SprinklerSystem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -280,8 +278,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         zone.settings.enabled = settings.get("enabled", True)
                         zone.settings.flow_rate = settings.get("flow_rate")
                         zone.settings.area_sqft = settings.get("area_sqft")
-                        # Only restore switch_entity from storage if NOT already configured from YAML
-                        # YAML config takes precedence over stored data
+                        # Only restore switch_entity from storage if not
+                        # already configured from YAML; YAML config takes
+                        # precedence over stored data.
                         stored_switch = settings.get("switch_entity")
                         if stored_switch and not zone.settings.switch_entity:
                             zone.settings.switch_entity = stored_switch
@@ -313,7 +312,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     start_time_str = schedule_data.get("start_time", "06:00")
                     hour, minute = map(int, start_time_str.split(":"))
                     schedule_time = time_type(hour, minute)
-                    # Convert zone_durations keys from strings to ints (JSON stringifies dict keys)
+                    # Convert zone_durations keys from strings to ints
+                    # (JSON stringifies dict keys).
                     raw_durations = schedule_data.get("zone_durations", {})
                     zone_durations = {int(k): v for k, v in raw_durations.items()}
 
@@ -470,23 +470,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await async_unregister_http_views(hass)
             await async_unregister_panel(hass)
 
-    return unload_ok
+    return bool(unload_ok)
 
 
 async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
     """Save system data to persistent storage."""
     try:
-        data = {
-            "system_name": system.system_name,
-            "is_enabled": system.is_enabled,
-            "rain_delay_active": system.rain_delay_active,
-            "zones": {},
-            "schedules": {},
-        }
+        zones: Dict[str, Any] = {}
+        schedules: Dict[str, Any] = {}
 
         # Save zone data
         for zone_id, zone in system.zones.items():
-            data["zones"][str(zone_id)] = {
+            zones[str(zone_id)] = {
                 "settings": {
                     "name": zone.settings.name,
                     "duration": zone.settings.duration,
@@ -501,7 +496,7 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
 
         # Save schedules
         for schedule_id, schedule in system.schedules.items():
-            data["schedules"][schedule_id] = {
+            schedules[schedule_id] = {
                 "name": schedule.name,
                 "zone_ids": schedule.zone_ids,
                 "start_time": schedule.start_time.strftime("%H:%M"),
@@ -512,6 +507,14 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
                 "rain_threshold": schedule.rain_threshold,
             }
 
+        data = {
+            "system_name": system.system_name,
+            "is_enabled": system.is_enabled,
+            "rain_delay_active": system.rain_delay_active,
+            "zones": zones,
+            "schedules": schedules,
+        }
+
         await store.async_save(data)
         _LOGGER.debug("Saved system data for %s", system.system_name)
 
@@ -519,8 +522,10 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
         _LOGGER.error("Failed to save system data: %s", e)
 
 
-def _get_system_from_entity_id(hass: HomeAssistant, entity_id: str) -> SprinklerSystem:
-    """Get the sprinkler system from an entity ID."""
+def _get_system_from_entity_id(
+    hass: HomeAssistant, entity_id: str
+) -> Optional[SprinklerSystem]:
+    """Get the sprinkler system from an entity ID, or None if not found."""
     _LOGGER.debug("Looking up system for entity_id: %s", entity_id)
     _LOGGER.debug(
         "Available keys in hass.data[DOMAIN]: %s", list(hass.data[DOMAIN].keys())
@@ -537,7 +542,7 @@ def _get_system_from_entity_id(hass: HomeAssistant, entity_id: str) -> Sprinkler
     # Search through entries
     for entry_id, entry_data in hass.data[DOMAIN].items():
         if isinstance(entry_data, dict) and "system" in entry_data:
-            system = entry_data["system"]
+            system = cast(SprinklerSystem, entry_data["system"])
             if system.entity_id == entity_id:
                 _LOGGER.debug("Found system via entry search (entry_id=%s)", entry_id)
                 _dump_zone_config(system)
@@ -557,7 +562,7 @@ def _get_system_from_entity_id(hass: HomeAssistant, entity_id: str) -> Sprinkler
     if reg_entry and reg_entry.config_entry_id:
         entry_data = hass.data[DOMAIN].get(reg_entry.config_entry_id)
         if isinstance(entry_data, dict) and "system" in entry_data:
-            system = entry_data["system"]
+            system = cast(SprinklerSystem, entry_data["system"])
             _LOGGER.debug(
                 "Found system via entity registry (config_entry_id=%s)",
                 reg_entry.config_entry_id,
@@ -733,7 +738,7 @@ async def _register_services(hass: HomeAssistant) -> None:
         await _trigger_state_update(hass, entity_id)
 
     async def handle_adjust_zone_time(call: ServiceCall) -> None:
-        """Handle adjust_zone_time service call - adjust remaining time for a running zone."""
+        """Handle adjust_zone_time: adjust remaining time for a running zone."""
         entity_id = call.data[ATTR_ENTITY_ID]
         zone_id = call.data[ATTR_ZONE_ID]
         new_duration = call.data[ATTR_DURATION]
@@ -1094,7 +1099,7 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
         """Update data - called every 30 seconds."""
         try:
             # Track active zones and their schedule queues BEFORE update
-            active_zones_before = {}
+            active_zones_before: Dict[int, Dict[str, Any]] = {}
             for zone_id, zone in self.system.zones.items():
                 if zone.is_watering() and zone.settings.switch_entity:
                     active_zones_before[zone_id] = {
@@ -1108,8 +1113,8 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Check for zones that were auto-stopped (were running, now idle)
             for zone_id, zone_data in active_zones_before.items():
-                zone = self.system.zones.get(zone_id)
-                if zone and not zone.is_watering():
+                zone_obj = self.system.zones.get(zone_id)
+                if zone_obj and not zone_obj.is_watering():
                     switch_entity = zone_data["switch_entity"]
                     schedule_queue = zone_data["schedule_queue"]
                     schedule_id = zone_data["schedule_id"]
@@ -1119,7 +1124,7 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.info(
                         "<<< ZONE STOP: zone %d (%s) timer expired",
                         zone_id,
-                        zone.settings.name,
+                        zone_obj.settings.name,
                     )
                     _LOGGER.info("    Turning off switch: %s", switch_entity)
                     try:
@@ -1204,44 +1209,45 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                                 first_zone_id, first_duration = queue[0]
                                 remaining_queue = queue[1:]
 
-                                zone = self.system.zones.get(first_zone_id)
-                                if zone:
+                                zone_obj = self.system.zones.get(first_zone_id)
+                                if zone_obj:
                                     self.system.start_zone(
                                         first_zone_id,
                                         first_duration,
                                         schedule.schedule_id,
                                     )
-                                    zone.schedule_queue = remaining_queue
+                                    zone_obj.schedule_queue = remaining_queue
 
                                     _LOGGER.info("-" * 50)
                                     _LOGGER.info(
-                                        ">>> ZONE START: zone %d (%s) for %d min | Queue remaining: %d",
+                                        ">>> ZONE START: zone %d (%s) for %d min "
+                                        "| Queue remaining: %d",
                                         first_zone_id,
-                                        zone.settings.name,
+                                        zone_obj.settings.name,
                                         first_duration,
                                         len(remaining_queue),
                                     )
 
                                     # Turn on the physical switch
-                                    if zone.settings.switch_entity:
+                                    switch_entity = zone_obj.settings.switch_entity
+                                    if switch_entity:
                                         _LOGGER.info(
                                             "    Turning on switch: %s",
-                                            zone.settings.switch_entity,
+                                            switch_entity,
                                         )
                                         try:
                                             await self.hass.services.async_call(
                                                 "switch",
                                                 "turn_on",
-                                                {
-                                                    "entity_id": zone.settings.switch_entity
-                                                },
+                                                {"entity_id": switch_entity},
                                                 blocking=True,
                                             )
                                             _LOGGER.info("    Switch ON confirmed")
                                         except Exception as e:
                                             _LOGGER.error(
-                                                "    SWITCH ERROR: Failed to turn on %s: %s",
-                                                zone.settings.switch_entity,
+                                                "    SWITCH ERROR: "
+                                                "Failed to turn on %s: %s",
+                                                switch_entity,
                                                 e,
                                             )
 
@@ -1258,7 +1264,8 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
             if active_zones:
                 for zone in active_zones:
                     _LOGGER.debug(
-                        "[STATUS] Zone %d (%s) running: %d min remaining, schedule=%s, queue=%d",
+                        "[STATUS] Zone %d (%s) running: %d min remaining, "
+                        "schedule=%s, queue=%d",
                         zone.zone_id,
                         zone.settings.name,
                         zone.remaining_duration,

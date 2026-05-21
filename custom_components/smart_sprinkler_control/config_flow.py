@@ -4,18 +4,19 @@ import logging
 from typing import Any, Dict, Optional
 
 import voluptuous as vol
-
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from .const import DOMAIN, DEFAULT_ZONE_COUNT
+from .const import DEFAULT_ZONE_COUNT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class SmartSprinklerManagerConfigFlow(
+    config_entries.ConfigFlow, domain=DOMAIN  # type: ignore[call-arg]
+):
     """Handle a config flow for Smart Sprinkler Manager."""
 
     VERSION = 1
@@ -52,7 +53,8 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "zone_switches": import_data.get("zone_switches", {}),
                 "weather_entity": import_data.get("weather_entity"),
                 "rain_sensor_entity": import_data.get("rain_sensor_entity"),
-                "enable_weather_integration": import_data.get("weather_entity") is not None,
+                "enable_weather_integration": import_data.get("weather_entity")
+                is not None,
             },
         )
 
@@ -80,22 +82,26 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 self._system_name = system_name
                 self._zone_count = zone_count
-                
+
                 # Proceed to zone configuration
                 return await self.async_step_zones()
 
         # Show form
-        data_schema = vol.Schema({
-            vol.Required("system_name", default="Smart Sprinkler System"): str,
-            vol.Required("zone_count", default=DEFAULT_ZONE_COUNT): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    mode=selector.NumberSelectorMode.BOX,
-                    min=1,
-                    max=32,
-                    step=1,
-                )
-            ),
-        })
+        data_schema = vol.Schema(
+            {
+                vol.Required("system_name", default="Smart Sprinkler System"): str,
+                vol.Required(
+                    "zone_count", default=DEFAULT_ZONE_COUNT
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=1,
+                        max=32,
+                        step=1,
+                    )
+                ),
+            }
+        )
 
         return self.async_show_form(
             step_id="user",
@@ -167,7 +173,6 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Build dynamic schema for zone switch mappings
         schema_dict = {}
         for i in range(1, self._zone_count + 1):
-            zone_name = self._zone_names.get(i, f"Zone {i}")
             schema_dict[vol.Optional(f"zone_{i}_switch")] = selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="switch")
             )
@@ -197,7 +202,9 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "zone_switches": self._zone_switches,
                 "weather_entity": user_input.get("weather_entity"),
                 "rain_sensor_entity": user_input.get("rain_sensor_entity"),
-                "enable_weather_integration": user_input.get("enable_weather_integration", False),
+                "enable_weather_integration": user_input.get(
+                    "enable_weather_integration", False
+                ),
             }
 
             return self.async_create_entry(
@@ -212,7 +219,10 @@ class SmartSprinklerManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         for state in self.hass.states.async_all():
             if state.entity_id.startswith("weather."):
                 weather_entities.append(state.entity_id)
-            elif state.entity_id.startswith("binary_sensor.") and "rain" in state.entity_id.lower():
+            elif (
+                state.entity_id.startswith("binary_sensor.")
+                and "rain" in state.entity_id.lower()
+            ):
                 rain_sensor_entities.append(state.entity_id)
 
         # Build schema with available entities
@@ -264,39 +274,40 @@ class SmartSprinklerManagerOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         # Get current configuration
-        current_config = self.config_entry.data
         current_options = self.config_entry.options
 
-        data_schema = vol.Schema({
-            vol.Optional(
-                "enable_weather_integration",
-                default=current_options.get("enable_weather_integration", False),
-            ): bool,
-            vol.Optional(
-                "rain_delay_hours",
-                default=current_options.get("rain_delay_hours", 24),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    mode=selector.NumberSelectorMode.BOX,
-                    min=1,
-                    max=168,  # 1 week
-                    step=1,
-                    unit_of_measurement="hours",
-                )
-            ),
-            vol.Optional(
-                "soil_moisture_threshold",
-                default=current_options.get("soil_moisture_threshold", 80),
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    mode=selector.NumberSelectorMode.BOX,
-                    min=0,
-                    max=100,
-                    step=5,
-                    unit_of_measurement="%",
-                )
-            ),
-        })
+        data_schema = vol.Schema(
+            {
+                vol.Optional(
+                    "enable_weather_integration",
+                    default=current_options.get("enable_weather_integration", False),
+                ): bool,
+                vol.Optional(
+                    "rain_delay_hours",
+                    default=current_options.get("rain_delay_hours", 24),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=1,
+                        max=168,  # 1 week
+                        step=1,
+                        unit_of_measurement="hours",
+                    )
+                ),
+                vol.Optional(
+                    "soil_moisture_threshold",
+                    default=current_options.get("soil_moisture_threshold", 80),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=0,
+                        max=100,
+                        step=5,
+                        unit_of_measurement="%",
+                    )
+                ),
+            }
+        )
 
         return self.async_show_form(
             step_id="init",
