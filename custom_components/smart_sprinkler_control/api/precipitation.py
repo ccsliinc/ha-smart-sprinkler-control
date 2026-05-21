@@ -1,12 +1,13 @@
 """Precipitation history API for Smart Sprinkler Control."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from aiohttp import web
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.history import get_significant_states
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,8 +86,13 @@ class PrecipitationAPI:
                     }
                 )
 
-            # Get history for last 24 hours
-            end_time = datetime.now()
+            # Get history for last 24 hours.
+            # ALL time handling uses HA's configured local timezone via
+            # dt_util so the recorder query window, the hourly bucket labels,
+            # and the "today" cutoff are computed in one consistent TZ.
+            # (The recorder accepts tz-aware datetimes and normalizes to UTC
+            # internally, so passing local-aware times is correct.)
+            end_time = dt_util.now()
             start_time = end_time - timedelta(hours=24)
 
             # Try to get history from recorder
@@ -107,15 +113,21 @@ class PrecipitationAPI:
                 _LOGGER.warning("Could not get history from recorder: %s", e)
                 history = {}
 
-            # Process history into hourly buckets
-            hourly_data = {}
-            for hour in range(24):
-                hour_start = end_time - timedelta(hours=24 - hour)
-                hour_key = hour_start.strftime("%H:00")
-                hourly_data[hour_key] = {"rain": 0, "snow": 0, "total": 0}
+            # Build 24 hourly buckets keyed by the *date-aware* local hour
+            # (truncated to the top of the hour). Keying by the full local
+            # datetime — rather than a bare "%H:00" string — keeps today's
+            # 05:00 distinct from yesterday's 05:00, which is required to
+            # compute today_total correctly near a day boundary.
+            local_now = end_time  # already local-aware (dt_util.now())
+            current_hour = local_now.replace(minute=0, second=0, microsecond=0)
+            # Oldest bucket first so the output reads chronologically.
+            bucket_hours = [current_hour - timedelta(hours=23 - i) for i in range(24)]
+            hourly_data = {
+                hour_dt: {"rain": 0, "snow": 0, "total": 0} for hour_dt in bucket_hours
+            }
 
-            # Calculate accumulation from history
-            # Intensity is in mm/h, so we need to integrate over time
+            # Calculate accumulation from history.
+            # Intensity is in mm/h (or in/h), so integrate rate over time.
             for entity_id, states in history.items():
                 is_snow = "snow" in entity_id
                 precip_type = "snow" if is_snow else "rain"
@@ -130,39 +142,40 @@ class PrecipitationAPI:
                     except (ValueError, TypeError):
                         value = 0
 
-                    state_time = state.last_updated
+                    # Recorder stores last_updated in UTC; convert to HA's
+                    # local timezone so the bucket reflects local hour-of-day.
+                    state_time = dt_util.as_local(state.last_updated)
 
                     if prev_state is not None and prev_time is not None:
-                        # Calculate precipitation for the time interval
-                        # Rate (mm/h) * duration (hours) = accumulation (mm)
+                        # Rate * duration (hours) = accumulation.
                         elapsed = (state_time - prev_time).total_seconds()
                         duration_hours = elapsed / 3600
                         accumulation = prev_state * duration_hours
 
-                        # Add to the appropriate hour bucket
-                        hour_key = prev_time.strftime("%H:00")
-                        if hour_key in hourly_data:
-                            hourly_data[hour_key][precip_type] += accumulation
-                            hourly_data[hour_key]["total"] += accumulation
+                        # Bucket by the date-aware local hour of the interval
+                        # start. Skip intervals that fall outside the window.
+                        bucket = prev_time.replace(minute=0, second=0, microsecond=0)
+                        if bucket in hourly_data:
+                            hourly_data[bucket][precip_type] += accumulation
+                            hourly_data[bucket]["total"] += accumulation
 
                     prev_state = value
                     prev_time = state_time
 
-            # Convert to list format for frontend
+            # Convert to list format for frontend.
             hourly_list = []
             total_24h = 0
             today_total = 0
-            midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # Local midnight (start of today in HA's configured TZ) so the
+            # today-window shares the same TZ as the bucket datetimes above.
+            midnight = dt_util.start_of_local_day()
 
-            for hour in range(24):
-                hour_time = end_time - timedelta(hours=24 - hour)
-                hour_key = hour_time.strftime("%H:00")
-                default = {"rain": 0, "snow": 0, "total": 0}
-                data = hourly_data.get(hour_key, default)
+            for hour_dt in bucket_hours:
+                data = hourly_data[hour_dt]
 
                 hourly_list.append(
                     {
-                        "hour": hour_key,
+                        "hour": hour_dt.strftime("%H:00"),
                         "rain": round(data["rain"], 2),
                         "snow": round(data["snow"], 2),
                         "total": round(data["total"], 2),
@@ -171,8 +184,8 @@ class PrecipitationAPI:
 
                 total_24h += data["total"]
 
-                # Check if this hour is today
-                if hour_time >= midnight:
+                # Count toward today only if this bucket is on/after local midnight.
+                if hour_dt >= midnight:
                     today_total += data["total"]
 
             return web.json_response(

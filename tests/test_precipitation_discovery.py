@@ -22,6 +22,8 @@ for mod_name in (
     "homeassistant.components.recorder",
     "homeassistant.components.recorder.history",
     "homeassistant.core",
+    "homeassistant.util",
+    "homeassistant.util.dt",
 ):
     sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
 
@@ -31,6 +33,9 @@ sys.modules["homeassistant.components.recorder.history"].get_significant_states 
     MagicMock()
 )
 sys.modules["homeassistant.core"].HomeAssistant = object
+# precipitation.py imports `from homeassistant.util import dt as dt_util`; the
+# discovery tests don't exercise time handling, so a MagicMock stub suffices.
+sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
 
 # Import the function under test directly from the source file.
 _PRECIP_PATH = (
