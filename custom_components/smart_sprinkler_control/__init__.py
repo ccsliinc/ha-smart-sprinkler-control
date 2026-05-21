@@ -14,33 +14,33 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .api.http import async_register_http_views, async_unregister_http_views
 from .const import (
-    DOMAIN,
-    PLATFORMS,
-    VERSION,
-    ISSUE_URL,
-    SERVICE_START_ZONE,
-    SERVICE_STOP_ZONE,
-    SERVICE_STOP_ALL_ZONES,
-    SERVICE_ADJUST_ZONE_TIME,
-    SERVICE_CREATE_SCHEDULE,
-    SERVICE_DELETE_SCHEDULE,
-    SERVICE_UPDATE_ZONE_SETTINGS,
-    SERVICE_UPDATE_SYSTEM_SETTINGS,
-    ATTR_ZONE_ID,
     ATTR_DURATION,
     ATTR_SCHEDULE_ID,
     ATTR_ZONE_COUNT,
+    ATTR_ZONE_ID,
+    CONF_RAIN_SENSOR_ENTITY,
     CONF_SYSTEM_NAME,
+    CONF_WEATHER_ENTITY,
     CONF_ZONE_COUNT,
     CONF_ZONE_NAMES,
-    CONF_WEATHER_ENTITY,
-    CONF_RAIN_SENSOR_ENTITY,
     CONF_ZONE_SWITCHES,
+    DOMAIN,
+    ISSUE_URL,
+    PLATFORMS,
+    SERVICE_ADJUST_ZONE_TIME,
+    SERVICE_CREATE_SCHEDULE,
+    SERVICE_DELETE_SCHEDULE,
+    SERVICE_START_ZONE,
+    SERVICE_STOP_ALL_ZONES,
+    SERVICE_STOP_ZONE,
+    SERVICE_UPDATE_SYSTEM_SETTINGS,
+    SERVICE_UPDATE_ZONE_SETTINGS,
+    VERSION,
 )
-from .models.zone import SprinklerSystem, SprinklerSchedule, ZoneSettings
-from .api.http import async_register_http_views, async_unregister_http_views
 from .frontend.panel import async_register_panel, async_unregister_panel
+from .models.zone import SprinklerSchedule, SprinklerSystem, ZoneSettings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,88 +48,116 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 
 # Service schemas
-START_ZONE_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
-    vol.Optional(ATTR_DURATION, default=15): vol.All(
-        vol.Coerce(int), vol.Range(min=1, max=120)
-    ),
-    vol.Optional(ATTR_SCHEDULE_ID): cv.string,
-})
+START_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
+        vol.Optional(ATTR_DURATION, default=15): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=120)
+        ),
+        vol.Optional(ATTR_SCHEDULE_ID): cv.string,
+    }
+)
 
-STOP_ZONE_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
-})
+STOP_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
+    }
+)
 
-STOP_ALL_ZONES_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-})
+STOP_ALL_ZONES_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+    }
+)
 
-ADJUST_ZONE_TIME_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
-    vol.Required(ATTR_DURATION): vol.All(
-        vol.Coerce(int), vol.Range(min=5, max=180)
-    ),
-})
+ADJUST_ZONE_TIME_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
+        vol.Required(ATTR_DURATION): vol.All(
+            vol.Coerce(int), vol.Range(min=5, max=180)
+        ),
+    }
+)
 
-ENABLE_RAIN_DELAY_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Optional("hours", default=24): vol.All(
-        vol.Coerce(int), vol.Range(min=1, max=168)
-    ),
-})
+ENABLE_RAIN_DELAY_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Optional("hours", default=24): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=168)
+        ),
+    }
+)
 
-DISABLE_RAIN_DELAY_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-})
+DISABLE_RAIN_DELAY_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+    }
+)
 
-UPDATE_ZONE_SETTINGS_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
-    vol.Optional("name"): cv.string,
-    vol.Optional("duration"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
-    vol.Optional("enabled"): cv.boolean,
-    vol.Optional("flow_rate"): vol.Coerce(float),
-    vol.Optional("area_sqft"): vol.Coerce(float),
-    vol.Optional("switch_entity"): cv.entity_id,
-})
+UPDATE_ZONE_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_ZONE_ID): vol.Coerce(int),
+        vol.Optional("name"): cv.string,
+        vol.Optional("duration"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+        vol.Optional("enabled"): cv.boolean,
+        vol.Optional("flow_rate"): vol.Coerce(float),
+        vol.Optional("area_sqft"): vol.Coerce(float),
+        vol.Optional("switch_entity"): cv.entity_id,
+    }
+)
 
-CREATE_SCHEDULE_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_SCHEDULE_ID): cv.string,
-    vol.Required("name"): cv.string,
-    vol.Required("zone_ids"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
-    vol.Required("start_time"): cv.string,  # HH:MM format
-    vol.Required("days_of_week"): vol.All(cv.ensure_list, [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))]),
-    vol.Optional("zone_durations"): dict,
-    vol.Optional("enabled", default=True): cv.boolean,
-    vol.Optional("skip_if_rain", default=True): cv.boolean,
-    vol.Optional("rain_threshold", default=0.1): vol.Coerce(float),
-})
+CREATE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_SCHEDULE_ID): cv.string,
+        vol.Required("name"): cv.string,
+        vol.Required("zone_ids"): vol.All(cv.ensure_list, [vol.Coerce(int)]),
+        vol.Required("start_time"): cv.string,  # HH:MM format
+        vol.Required("days_of_week"): vol.All(
+            cv.ensure_list, [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))]
+        ),
+        vol.Optional("zone_durations"): dict,
+        vol.Optional("enabled", default=True): cv.boolean,
+        vol.Optional("skip_if_rain", default=True): cv.boolean,
+        vol.Optional("rain_threshold", default=0.1): vol.Coerce(float),
+    }
+)
 
-DELETE_SCHEDULE_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_SCHEDULE_ID): cv.string,
-})
+DELETE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_SCHEDULE_ID): cv.string,
+    }
+)
 
-RUN_SCHEDULE_SCHEMA = vol.Schema({
-    vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-    vol.Required(ATTR_SCHEDULE_ID): cv.string,
-})
+RUN_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
+        vol.Required(ATTR_SCHEDULE_ID): cv.string,
+    }
+)
 
 # YAML Configuration schema for autoload
 CONFIG_SCHEMA = vol.Schema(
     {
-        DOMAIN: vol.Schema({
-            vol.Required(CONF_SYSTEM_NAME): cv.string,
-            vol.Required(CONF_ZONE_COUNT): vol.All(vol.Coerce(int), vol.Range(min=1, max=32)),
-            vol.Optional(CONF_ZONE_NAMES, default={}): {vol.Coerce(int): cv.string},
-            vol.Optional(CONF_ZONE_SWITCHES, default={}): {vol.Coerce(int): cv.entity_id},
-            vol.Optional(CONF_WEATHER_ENTITY): cv.entity_id,
-            vol.Optional(CONF_RAIN_SENSOR_ENTITY): cv.entity_id,
-        })
+        DOMAIN: vol.Schema(
+            {
+                vol.Required(CONF_SYSTEM_NAME): cv.string,
+                vol.Required(CONF_ZONE_COUNT): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=32)
+                ),
+                vol.Optional(CONF_ZONE_NAMES, default={}): {vol.Coerce(int): cv.string},
+                vol.Optional(CONF_ZONE_SWITCHES, default={}): {
+                    vol.Coerce(int): cv.entity_id
+                },
+                vol.Optional(CONF_WEATHER_ENTITY): cv.entity_id,
+                vol.Optional(CONF_RAIN_SENSOR_ENTITY): cv.entity_id,
+            }
+        )
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -205,7 +233,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     # Configure zones with names and switch entities from config
-    _LOGGER.debug("Configuring zones. zone_names=%s, zone_switches=%s", zone_names, zone_switches)
+    _LOGGER.debug(
+        "Configuring zones. zone_names=%s, zone_switches=%s", zone_names, zone_switches
+    )
     for zone_id, zone in system.zones.items():
         zone_id_str = str(zone_id)
         # Set zone name
@@ -216,10 +246,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Set switch entity
         if zone_id_str in zone_switches:
             zone.settings.switch_entity = zone_switches[zone_id_str]
-            _LOGGER.debug("Zone %d: set switch_entity to %s", zone_id, zone.settings.switch_entity)
+            _LOGGER.debug(
+                "Zone %d: set switch_entity to %s", zone_id, zone.settings.switch_entity
+            )
         elif zone_id in zone_switches:
             zone.settings.switch_entity = zone_switches[zone_id]
-            _LOGGER.debug("Zone %d: set switch_entity to %s (int key)", zone_id, zone.settings.switch_entity)
+            _LOGGER.debug(
+                "Zone %d: set switch_entity to %s (int key)",
+                zone_id,
+                zone.settings.switch_entity,
+            )
         else:
             _LOGGER.warning("Zone %d: no switch entity found in config", zone_id)
 
@@ -249,16 +285,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         stored_switch = settings.get("switch_entity")
                         if stored_switch and not zone.settings.switch_entity:
                             zone.settings.switch_entity = stored_switch
-                            _LOGGER.debug("Zone %d: restored switch_entity from storage: %s", zone_id, stored_switch)
+                            _LOGGER.debug(
+                                "Zone %d: restored switch_entity from storage: %s",
+                                zone_id,
+                                stored_switch,
+                            )
                         elif zone.settings.switch_entity:
-                            _LOGGER.debug("Zone %d: keeping YAML-configured switch_entity: %s", zone_id, zone.settings.switch_entity)
+                            _LOGGER.debug(
+                                "Zone %d: keeping YAML-configured switch_entity: %s",
+                                zone_id,
+                                zone.settings.switch_entity,
+                            )
                     # Restore statistics
                     zone.total_runtime_today = zone_data.get("total_runtime_today", 0)
-                    zone.total_water_used_today = zone_data.get("total_water_used_today", 0.0)
+                    zone.total_water_used_today = zone_data.get(
+                        "total_water_used_today", 0.0
+                    )
 
         # Restore schedules
         if stored_data.get("schedules"):
-            from datetime import time as time_type, datetime
+            from datetime import datetime
+            from datetime import time as time_type
+
             now = datetime.now()
             for schedule_id, schedule_data in stored_data["schedules"].items():
                 try:
@@ -284,7 +332,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # set last_run_date to prevent auto-run on startup
                     if now.time() >= schedule_time:
                         schedule.last_run_date = now
-                        _LOGGER.debug("Schedule %s: marking as run today (startup safety)", schedule_id)
+                        _LOGGER.debug(
+                            "Schedule %s: marking as run today (startup safety)",
+                            schedule_id,
+                        )
                     system.schedules[schedule_id] = schedule
                     _LOGGER.debug("Restored schedule: %s", schedule_id)
                 except Exception as e:
@@ -326,7 +377,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     {"entity_id": zone.settings.switch_entity},
                     blocking=True,
                 )
-                _LOGGER.debug("Startup safety: turned off %s", zone.settings.switch_entity)
+                _LOGGER.debug(
+                    "Startup safety: turned off %s", zone.settings.switch_entity
+                )
             except Exception as e:
                 _LOGGER.warning(
                     "Startup safety: failed to turn off %s: %s",
@@ -359,7 +412,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Register HTTP views and panel (only for first entry)
-    if len([e for e in hass.data[DOMAIN].values() if isinstance(e, dict) and "system" in e]) == 1:
+    if (
+        len(
+            [
+                e
+                for e in hass.data[DOMAIN].values()
+                if isinstance(e, dict) and "system" in e
+            ]
+        )
+        == 1
+    ):
         await async_register_http_views(hass)
         await async_register_panel(hass)
 
@@ -389,8 +451,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Remove services and panel only if this is the last instance
         if not any(
-            isinstance(v, dict) and "system" in v
-            for v in hass.data[DOMAIN].values()
+            isinstance(v, dict) and "system" in v for v in hass.data[DOMAIN].values()
         ):
             _LOGGER.info("Removing Smart Sprinkler Control services")
             for service in [
@@ -461,7 +522,9 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
 def _get_system_from_entity_id(hass: HomeAssistant, entity_id: str) -> SprinklerSystem:
     """Get the sprinkler system from an entity ID."""
     _LOGGER.debug("Looking up system for entity_id: %s", entity_id)
-    _LOGGER.debug("Available keys in hass.data[DOMAIN]: %s", list(hass.data[DOMAIN].keys()))
+    _LOGGER.debug(
+        "Available keys in hass.data[DOMAIN]: %s", list(hass.data[DOMAIN].keys())
+    )
 
     # Try direct lookup by entity_id
     if entity_id in hass.data[DOMAIN]:
@@ -588,7 +651,9 @@ async def _register_services(hass: HomeAssistant) -> None:
         # 5-second delay between stopping one zone and starting another
         # This protects the sprinkler valves and allows water pressure to stabilize
         if zone_was_stopped:
-            _LOGGER.info("Waiting 5 seconds before starting zone %d (valve protection)", zone_id)
+            _LOGGER.info(
+                "Waiting 5 seconds before starting zone %d (valve protection)", zone_id
+            )
             await asyncio.sleep(5)
 
         # Start the zone in the system (this also updates model state)
@@ -656,7 +721,8 @@ async def _register_services(hass: HomeAssistant) -> None:
             except Exception as e:
                 _LOGGER.error(
                     "    SWITCH ERROR: Failed to turn off %s: %s",
-                    zone.settings.switch_entity, e,
+                    zone.settings.switch_entity,
+                    e,
                 )
 
         result = system.stop_zone(zone_id)
@@ -688,10 +754,13 @@ async def _register_services(hass: HomeAssistant) -> None:
 
         # Enforce minimum of 5 minutes
         new_duration = max(5, new_duration)
-        _LOGGER.info("Adjusting zone %d remaining time to %d minutes", zone_id, new_duration)
+        _LOGGER.info(
+            "Adjusting zone %d remaining time to %d minutes", zone_id, new_duration
+        )
 
         # Update the zone's remaining duration and end_time
         from datetime import datetime, timedelta
+
         zone.remaining_duration = new_duration
         zone.end_time = datetime.now() + timedelta(minutes=new_duration)
 
@@ -796,7 +865,8 @@ async def _register_services(hass: HomeAssistant) -> None:
 
     async def handle_create_schedule(call: ServiceCall) -> None:
         """Handle create_schedule service call."""
-        from datetime import time as time_type, datetime
+        from datetime import datetime
+        from datetime import time as time_type
 
         entity_id = call.data[ATTR_ENTITY_ID]
         schedule_id = call.data[ATTR_SCHEDULE_ID]
@@ -830,11 +900,17 @@ async def _register_services(hass: HomeAssistant) -> None:
         if existing_schedule:
             # Preserve last_run_date when editing to prevent re-triggering
             schedule.last_run_date = existing_schedule.last_run_date
-            _LOGGER.debug("Schedule %s: preserving last_run_date from existing schedule", schedule_id)
+            _LOGGER.debug(
+                "Schedule %s: preserving last_run_date from existing schedule",
+                schedule_id,
+            )
         elif now.time() >= schedule_time:
             # New schedule: if start time already passed today, mark as run
             schedule.last_run_date = now
-            _LOGGER.debug("Schedule %s: start time already passed, marking as run today", schedule_id)
+            _LOGGER.debug(
+                "Schedule %s: start time already passed, marking as run today",
+                schedule_id,
+            )
 
         result = system.create_schedule(schedule)
         if result:
@@ -882,7 +958,8 @@ async def _register_services(hass: HomeAssistant) -> None:
             running_id = system.get_running_schedule_id()
             _LOGGER.warning(
                 "Cannot run schedule %s: schedule %s is already running",
-                schedule_id, running_id
+                schedule_id,
+                running_id,
             )
             return
 
@@ -917,7 +994,10 @@ async def _register_services(hass: HomeAssistant) -> None:
 
         _LOGGER.info(
             ">>> ZONE START: zone %d (%s) for %d min | Queue remaining: %d",
-            first_zone_id, zone.settings.name, first_duration, len(remaining_queue)
+            first_zone_id,
+            zone.settings.name,
+            first_duration,
+            len(remaining_queue),
         )
 
         # Turn on the physical switch
@@ -930,7 +1010,9 @@ async def _register_services(hass: HomeAssistant) -> None:
                     blocking=True,
                 )
             except Exception as e:
-                _LOGGER.error("Failed to turn on switch for zone %d: %s", first_zone_id, e)
+                _LOGGER.error(
+                    "Failed to turn on switch for zone %d: %s", first_zone_id, e
+                )
 
         # Trigger state update
         await _trigger_state_update(hass, entity_id)
@@ -943,25 +1025,46 @@ async def _register_services(hass: HomeAssistant) -> None:
         DOMAIN, SERVICE_STOP_ZONE, handle_stop_zone, schema=STOP_ZONE_SCHEMA
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_STOP_ALL_ZONES, handle_stop_all_zones, schema=STOP_ALL_ZONES_SCHEMA
+        DOMAIN,
+        SERVICE_STOP_ALL_ZONES,
+        handle_stop_all_zones,
+        schema=STOP_ALL_ZONES_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_ADJUST_ZONE_TIME, handle_adjust_zone_time, schema=ADJUST_ZONE_TIME_SCHEMA
+        DOMAIN,
+        SERVICE_ADJUST_ZONE_TIME,
+        handle_adjust_zone_time,
+        schema=ADJUST_ZONE_TIME_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, "enable_rain_delay", handle_enable_rain_delay, schema=ENABLE_RAIN_DELAY_SCHEMA
+        DOMAIN,
+        "enable_rain_delay",
+        handle_enable_rain_delay,
+        schema=ENABLE_RAIN_DELAY_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, "disable_rain_delay", handle_disable_rain_delay, schema=DISABLE_RAIN_DELAY_SCHEMA
+        DOMAIN,
+        "disable_rain_delay",
+        handle_disable_rain_delay,
+        schema=DISABLE_RAIN_DELAY_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_UPDATE_ZONE_SETTINGS, handle_update_zone_settings, schema=UPDATE_ZONE_SETTINGS_SCHEMA
+        DOMAIN,
+        SERVICE_UPDATE_ZONE_SETTINGS,
+        handle_update_zone_settings,
+        schema=UPDATE_ZONE_SETTINGS_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_CREATE_SCHEDULE, handle_create_schedule, schema=CREATE_SCHEDULE_SCHEMA
+        DOMAIN,
+        SERVICE_CREATE_SCHEDULE,
+        handle_create_schedule,
+        schema=CREATE_SCHEDULE_SCHEMA,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_DELETE_SCHEDULE, handle_delete_schedule, schema=DELETE_SCHEDULE_SCHEMA
+        DOMAIN,
+        SERVICE_DELETE_SCHEDULE,
+        handle_delete_schedule,
+        schema=DELETE_SCHEDULE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN, "run_schedule", handle_run_schedule, schema=RUN_SCHEDULE_SCHEMA
@@ -1015,7 +1118,8 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("-" * 50)
                     _LOGGER.info(
                         "<<< ZONE STOP: zone %d (%s) timer expired",
-                        zone_id, zone.settings.name
+                        zone_id,
+                        zone.settings.name,
                     )
                     _LOGGER.info("    Turning off switch: %s", switch_entity)
                     try:
@@ -1029,13 +1133,19 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                     except Exception as e:
                         _LOGGER.error(
                             "    SWITCH ERROR: Failed to turn off %s: %s",
-                            switch_entity, e,
+                            switch_entity,
+                            e,
                         )
 
                     # If this zone had a schedule queue, start the next zone
                     if schedule_queue:
-                        _LOGGER.info("    Queue has %d zones remaining, starting next...", len(schedule_queue))
-                        await self._start_next_scheduled_zone(schedule_queue, schedule_id)
+                        _LOGGER.info(
+                            "    Queue has %d zones remaining, starting next...",
+                            len(schedule_queue),
+                        )
+                        await self._start_next_scheduled_zone(
+                            schedule_queue, schedule_id
+                        )
                     else:
                         _LOGGER.info("    No more zones in queue - schedule complete")
                         _LOGGER.info("=" * 60)
@@ -1044,19 +1154,22 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
 
             # Check schedules that should run now
             from datetime import datetime
+
             now = datetime.now()
 
             for schedule in self.system.schedules.values():
                 if schedule.enabled and schedule.should_run_now():
                     # Check if we haven't already run today
-                    if not schedule.last_run_date or schedule.last_run_date.date() != now.date():
+                    if (
+                        not schedule.last_run_date
+                        or schedule.last_run_date.date() != now.date()
+                    ):
                         # Check rain conditions
                         should_skip = False
                         if schedule.skip_if_rain and self.system.rain_delay_active:
                             should_skip = True
                             _LOGGER.info(
-                                "Skipping schedule %s due to rain delay",
-                                schedule.name
+                                "Skipping schedule %s due to rain delay", schedule.name
                             )
 
                         if not should_skip:
@@ -1064,12 +1177,16 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                             if self.system.is_schedule_running():
                                 _LOGGER.info(
                                     "Skipping schedule %s: another schedule is running",
-                                    schedule.name
+                                    schedule.name,
                                 )
                                 continue
 
                             _LOGGER.info("=" * 60)
-                            _LOGGER.info("SCHEDULE RUN: %s (auto-trigger at %s)", schedule.name, schedule.start_time)
+                            _LOGGER.info(
+                                "SCHEDULE RUN: %s (auto-trigger at %s)",
+                                schedule.name,
+                                schedule.start_time,
+                            )
                             _LOGGER.info("  Zones: %s", schedule.zone_ids)
                             _LOGGER.info("=" * 60)
 
@@ -1078,7 +1195,9 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                             for zone_id in schedule.zone_ids:
                                 dur = schedule.get_zone_duration(zone_id)
                                 queue.append((zone_id, dur))
-                                _LOGGER.info("  Queue item: zone %d for %d min", zone_id, dur)
+                                _LOGGER.info(
+                                    "  Queue item: zone %d for %d min", zone_id, dur
+                                )
 
                             if queue:
                                 # Start the first zone with queue
@@ -1087,30 +1206,43 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
 
                                 zone = self.system.zones.get(first_zone_id)
                                 if zone:
-                                    self.system.start_zone(first_zone_id, first_duration, schedule.schedule_id)
+                                    self.system.start_zone(
+                                        first_zone_id,
+                                        first_duration,
+                                        schedule.schedule_id,
+                                    )
                                     zone.schedule_queue = remaining_queue
 
                                     _LOGGER.info("-" * 50)
                                     _LOGGER.info(
                                         ">>> ZONE START: zone %d (%s) for %d min | Queue remaining: %d",
-                                        first_zone_id, zone.settings.name, first_duration, len(remaining_queue)
+                                        first_zone_id,
+                                        zone.settings.name,
+                                        first_duration,
+                                        len(remaining_queue),
                                     )
 
                                     # Turn on the physical switch
                                     if zone.settings.switch_entity:
-                                        _LOGGER.info("    Turning on switch: %s", zone.settings.switch_entity)
+                                        _LOGGER.info(
+                                            "    Turning on switch: %s",
+                                            zone.settings.switch_entity,
+                                        )
                                         try:
                                             await self.hass.services.async_call(
                                                 "switch",
                                                 "turn_on",
-                                                {"entity_id": zone.settings.switch_entity},
+                                                {
+                                                    "entity_id": zone.settings.switch_entity
+                                                },
                                                 blocking=True,
                                             )
                                             _LOGGER.info("    Switch ON confirmed")
                                         except Exception as e:
                                             _LOGGER.error(
                                                 "    SWITCH ERROR: Failed to turn on %s: %s",
-                                                zone.settings.switch_entity, e
+                                                zone.settings.switch_entity,
+                                                e,
                                             )
 
                             schedule.last_run_date = now
@@ -1127,9 +1259,11 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                 for zone in active_zones:
                     _LOGGER.debug(
                         "[STATUS] Zone %d (%s) running: %d min remaining, schedule=%s, queue=%d",
-                        zone.zone_id, zone.settings.name, zone.remaining_duration,
+                        zone.zone_id,
+                        zone.settings.name,
+                        zone.remaining_duration,
                         zone.current_schedule_id or "manual",
-                        len(zone.schedule_queue)
+                        len(zone.schedule_queue),
                     )
 
             return {
@@ -1141,7 +1275,9 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
 
         except Exception as exception:
             _LOGGER.error("Error updating sprinkler data: %s", exception)
-            raise UpdateFailed(f"Error updating sprinkler data: {exception}") from exception
+            raise UpdateFailed(
+                f"Error updating sprinkler data: {exception}"
+            ) from exception
 
     async def _start_next_scheduled_zone(self, queue: list, schedule_id: str) -> None:
         """Start the next zone from a schedule queue.
@@ -1175,7 +1311,10 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.info("-" * 50)
         _LOGGER.info(
             ">>> ZONE START: zone %d (%s) for %d min | Queue remaining: %d",
-            next_zone_id, zone.settings.name, duration, len(remaining_queue)
+            next_zone_id,
+            zone.settings.name,
+            duration,
+            len(remaining_queue),
         )
 
         # Start the zone and pass the remaining queue
@@ -1196,7 +1335,10 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.error(
                     "    SWITCH ERROR: Failed to turn on %s: %s",
-                    zone.settings.switch_entity, e
+                    zone.settings.switch_entity,
+                    e,
                 )
         else:
-            _LOGGER.warning("    WARNING: No switch configured for zone %d", next_zone_id)
+            _LOGGER.warning(
+                "    WARNING: No switch configured for zone %d", next_zone_id
+            )
