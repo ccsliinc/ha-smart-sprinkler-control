@@ -21,6 +21,36 @@ PRECIP_DEVICE_CLASSES = ("precipitation", "precipitation_intensity")
 _INVALID_STATES = ("unknown", "unavailable", None)
 
 
+def _discover_precip_unit(hass: HomeAssistant, sensors: list[str]) -> str:
+    """Return the precipitation display unit from a discovered sensor.
+
+    Description:
+        Reads ``unit_of_measurement`` from the first sensor with a usable
+        value, strips a trailing ``/h`` (so ``in/h`` -> ``in``, ``mm/h`` ->
+        ``mm``). Falls back to ``"in"`` when nothing reports a unit so the
+        frontend always has a label to render.
+    Inputs:
+        hass: Home Assistant instance.
+        sensors: Entity ids of precipitation sensors (rain + snow).
+    Outputs:
+        str — display unit ("in" or "mm"), default "in".
+    """
+    for eid in sensors:
+        state = hass.states.get(eid)
+        if state is None:
+            continue
+        unit = state.attributes.get("unit_of_measurement")
+        if not unit:
+            continue
+        unit = str(unit).strip()
+        if unit.endswith("/h"):
+            unit = unit[:-2]
+        unit = unit.strip()
+        if unit:
+            return unit
+    return "in"
+
+
 def _current_rain_rate(hass: HomeAssistant, rain_sensors: list[str]) -> float:
     """Return the current combined rain intensity from rain sensors.
 
@@ -75,6 +105,7 @@ async def compute_precipitation_totals(hass: HomeAssistant) -> Dict[str, Any]:
     all_sensors = rain_sensors + snow_sensors
 
     current_rate = _current_rain_rate(hass, rain_sensors)
+    unit = _discover_precip_unit(hass, all_sensors)
 
     if not all_sensors:
         return {
@@ -82,6 +113,7 @@ async def compute_precipitation_totals(hass: HomeAssistant) -> Dict[str, Any]:
             "today_total": 0.0,
             "total_24h": 0.0,
             "current_rate": current_rate,
+            "unit": unit,
             "sensors": {"rain": rain_sensors, "snow": snow_sensors},
         }
 
@@ -169,6 +201,7 @@ async def compute_precipitation_totals(hass: HomeAssistant) -> Dict[str, Any]:
         "today_total": round(today_total, 2),
         "total_24h": round(total_24h, 2),
         "current_rate": current_rate,
+        "unit": unit,
         "sensors": {"rain": rain_sensors, "snow": snow_sensors},
     }
 
@@ -237,16 +270,18 @@ class PrecipitationAPI:
                         "hourly": [],
                         "today_total": 0,
                         "total_24h": 0,
+                        "unit": totals.get("unit", "in"),
                     }
                 )
 
             # current_rate is internal to gating decisions; the frontend
-            # contract is hourly/today_total/total_24h/sensors.
+            # contract is hourly/today_total/total_24h/unit/sensors.
             return web.json_response(
                 {
                     "hourly": totals["hourly"],
                     "today_total": totals["today_total"],
                     "total_24h": totals["total_24h"],
+                    "unit": totals.get("unit", "in"),
                     "sensors": totals["sensors"],
                 }
             )
@@ -259,6 +294,7 @@ class PrecipitationAPI:
                     "hourly": [],
                     "today_total": 0,
                     "total_24h": 0,
+                    "unit": "in",
                 },
                 status=500,
             )

@@ -25,6 +25,10 @@ export const rainChartMethods = {
   },
 
   _renderRainGraph() {
+    // Default to in until the API tells us otherwise; _rainUnit is set on
+    // every successful fetch so subsequent renders reflect the real sensor
+    // unit (mm on metric HA installs, in on imperial).
+    const unit = this._rainUnit || 'in';
     return `
     <div class="rain-graph-container" style="
       background: rgba(0, 0, 0, 0.3);
@@ -40,8 +44,8 @@ export const rainChartMethods = {
           Precipitation (24h)
         </h3>
         <div style="display: flex; align-items: center; gap: 12px;">
-          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 mm</span>
-          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 mm</span>
+          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 ${unit}</span>
+          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 ${unit}</span>
         </div>
       </div>
       <div style="height: 120px; position: relative;">
@@ -97,6 +101,7 @@ export const rainChartMethods = {
         total: data.total_24h || 0,
         today: data.today_total || 0,
         source,
+        unit: data.unit || 'in',
         currentRate: chartData[chartData.length - 1] || 0
       };
 
@@ -122,7 +127,7 @@ export const rainChartMethods = {
       data.push(0);
     }
 
-    return { labels, data, total: 0, today: 0, source: reason, currentRate: 0 };
+    return { labels, data, total: 0, today: 0, source: reason, unit: this._rainUnit || 'in', currentRate: 0 };
   },
 
 
@@ -166,22 +171,39 @@ export const rainChartMethods = {
     if (!rainData) return;
     const { labels, data, total, source } = rainData;
 
+    // Persist the unit so subsequent placeholder renders and the chart init
+    // (legend/ticks/tooltip) can pick it up without re-reading the API.
+    this._rainUnit = rainData.unit || this._rainUnit || 'in';
+    const unit = this._rainUnit;
+
     const todayEl = this.querySelector('#rain-today');
     const totalEl = this.querySelector('#rain-total');
 
     if (todayEl) {
       const todayNum = typeof rainData.today === 'number' ? rainData.today : parseFloat(rainData.today) || 0;
-      todayEl.textContent = `Today: ${todayNum.toFixed(1)} mm`;
+      todayEl.textContent = `Today: ${todayNum.toFixed(1)} ${unit}`;
     }
     if (totalEl) {
       const totalNum = typeof total === 'number' ? total : parseFloat(total) || 0;
       const sourceLabel = source === 'no sensor' ? ' (no sensor)' : source === 'no hass' ? ' (no hass)' : '';
-      totalEl.textContent = `24h: ${totalNum.toFixed(1)} mm${sourceLabel}`;
+      totalEl.textContent = `24h: ${totalNum.toFixed(1)} ${unit}${sourceLabel}`;
     }
 
     if (this._rainChart) {
       this._rainChart.data.labels = labels;
       this._rainChart.data.datasets[0].data = data;
+      // Keep dataset label, Y-axis tick formatter, and tooltip label in
+      // sync with the freshly observed unit so the chart relabels on the
+      // next refresh without needing a destroy/recreate.
+      this._rainChart.data.datasets[0].label = `Rain (${unit})`;
+      const yScale = this._rainChart.options?.scales?.y;
+      if (yScale?.ticks) {
+        yScale.ticks.callback = (value) => value + ' ' + unit;
+      }
+      const tooltipCb = this._rainChart.options?.plugins?.tooltip?.callbacks;
+      if (tooltipCb) {
+        tooltipCb.label = (context) => `${context.parsed.y.toFixed(2)} ${unit}`;
+      }
       this._rainChart.update();
     }
   },
@@ -229,13 +251,17 @@ export const rainChartMethods = {
 
     const ctx = canvas.getContext('2d');
     const { labels, data } = rainData;
+    // Seed unit before chart creation so initial legend/ticks/tooltip
+    // match the sensor's unit_of_measurement on first render.
+    this._rainUnit = rainData.unit || this._rainUnit || 'in';
+    const unit = this._rainUnit;
 
     this._rainChart = new Chart(ctx, {
       type: 'line',
       data: {
         labels: labels,
         datasets: [{
-          label: 'Rain (mm)',
+          label: `Rain (${unit})`,
           data: data,
           borderColor: '#00ffff',
           backgroundColor: 'rgba(0, 255, 255, 0.1)',
@@ -260,7 +286,7 @@ export const rainChartMethods = {
             borderColor: 'rgba(0, 255, 255, 0.3)',
             borderWidth: 1,
             callbacks: {
-              label: (context) => `${context.parsed.y.toFixed(2)} mm`
+              label: (context) => `${context.parsed.y.toFixed(2)} ${unit}`
             }
           }
         },
@@ -283,7 +309,7 @@ export const rainChartMethods = {
             ticks: {
               color: '#666',
               font: { size: 10 },
-              callback: (value) => value + ' mm'
+              callback: (value) => value + ' ' + unit
             }
           }
         }
