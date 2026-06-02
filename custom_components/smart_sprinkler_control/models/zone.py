@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional
 
 _LOGGER = logging.getLogger(__name__)
@@ -224,6 +224,10 @@ class SprinklerSystem:
     total_runtime_today: int = 0  # minutes
     total_runtime_week: int = 0
     active_zones_count: int = 0
+    # Calendar date the daily statistics above belong to. Used to reset
+    # per-zone and system daily totals at the day rollover. Persisted so a
+    # restart neither double-resets nor skips a reset. None until first set.
+    stats_date: Optional[date] = None
 
     # Connection and status (NO SENSORS!)
     is_connected: bool = True
@@ -236,6 +240,46 @@ class SprinklerSystem:
             for zone_id in range(1, self.zone_count + 1):
                 zone_settings = ZoneSettings(name=f"Zone {zone_id}")
                 self.zones[zone_id] = Zone(zone_id=zone_id, settings=zone_settings)
+
+    def reset_daily_stats_if_new_day(self, today: Optional[date] = None) -> bool:
+        """Reset per-zone and system daily totals at the day rollover.
+
+        Description:
+            Zeroes ``total_runtime_today`` / ``total_water_used_today`` on every
+            zone and on the system whenever the calendar date has changed since
+            the last reset. Tracked via ``self.stats_date`` so a reset happens
+            exactly once per day and survives restarts (the date is persisted).
+
+        Inputs:
+            today (Optional[date]): the current date; defaults to ``date.today()``.
+
+        Outputs:
+            bool: True if a reset was performed, False if it was already current.
+
+        Example:
+            >>> system.reset_daily_stats_if_new_day()  # at 00:00 rollover
+            True
+        """
+        if today is None:
+            today = datetime.now().date()
+
+        # First-ever run (no persisted date): adopt today without wiping any
+        # stats restored from storage. Subsequent days trigger a real reset.
+        if self.stats_date is None:
+            self.stats_date = today
+            return False
+
+        if self.stats_date == today:
+            return False
+
+        for zone in self.zones.values():
+            zone.total_runtime_today = 0
+            zone.total_water_used_today = 0.0
+        self.total_runtime_today = 0
+        self.total_water_used_today = 0.0
+        self.stats_date = today
+        _LOGGER.info("Daily sprinkler statistics reset for %s", today.isoformat())
+        return True
 
     def get_active_zones(self) -> List[Zone]:
         """Get list of currently watering zones."""

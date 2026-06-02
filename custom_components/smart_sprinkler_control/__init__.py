@@ -327,6 +327,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     zone.total_water_used_today = zone_data.get(
                         "total_water_used_today", 0.0
                     )
+                    # Restore the per-zone "last run" timestamp so it survives a
+                    # restart instead of resetting to None (ISO string or None).
+                    last_watering_raw = zone_data.get("last_watering_date")
+                    if last_watering_raw:
+                        try:
+                            from datetime import datetime as _dt
+
+                            zone.last_watering_date = _dt.fromisoformat(
+                                last_watering_raw
+                            )
+                        except (ValueError, TypeError):
+                            zone.last_watering_date = None
+                            _LOGGER.warning(
+                                "Zone %d: could not parse stored "
+                                "last_watering_date %r",
+                                zone_id,
+                                last_watering_raw,
+                            )
 
         # Restore schedules
         if stored_data.get("schedules"):
@@ -398,6 +416,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             system.auto_rain_delay = bool(stored_data.get("auto_rain_delay", False))
         if stored_data.get("is_enabled") is not None:
             system.is_enabled = stored_data["is_enabled"]
+        # Restore the daily-stats date so the day-rollover reset survives a
+        # restart (won't double-reset or skip a day). None until first cycle.
+        stats_date_raw = stored_data.get("stats_date")
+        if stats_date_raw:
+            try:
+                from datetime import date as _date
+
+                system.stats_date = _date.fromisoformat(stats_date_raw)
+            except (ValueError, TypeError):
+                system.stats_date = None
+                _LOGGER.warning("Could not parse stored stats_date %r", stats_date_raw)
 
     # Log final zone configuration after all setup
     _LOGGER.info("Final zone configuration for %s:", system_name)
@@ -544,6 +573,13 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
                 },
                 "total_runtime_today": zone.total_runtime_today,
                 "total_water_used_today": zone.total_water_used_today,
+                # Persist the zone's last run timestamp so the "last run" shown
+                # per zone survives an HA restart (ISO string or None).
+                "last_watering_date": (
+                    zone.last_watering_date.isoformat()
+                    if zone.last_watering_date
+                    else None
+                ),
             }
 
         # Save schedules
@@ -571,6 +607,11 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
             "is_enabled": system.is_enabled,
             "rain_delay_active": system.rain_delay_active,
             "auto_rain_delay": system.auto_rain_delay,
+            # Persist the date the daily stats belong to so the day-rollover
+            # reset survives a restart (won't double-reset or skip a day).
+            "stats_date": (
+                system.stats_date.isoformat() if system.stats_date else None
+            ),
             "zones": zones,
             "schedules": schedules,
         }
@@ -1295,6 +1336,12 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
             from datetime import datetime
 
             now = datetime.now()
+
+            # Daily-stats rollover: zero per-zone and system daily totals once
+            # per calendar day. Done BEFORE schedule evaluation so a new day's
+            # run accumulates into a fresh count. stats_date is persisted, so a
+            # restart neither double-resets nor skips the reset.
+            self.system.reset_daily_stats_if_new_day(now.date())
 
             for schedule in self.system.schedules.values():
                 if schedule.enabled and schedule.should_run_now():

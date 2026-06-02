@@ -12,7 +12,7 @@ require a running Home Assistant instance.
 """
 
 import importlib.util
-from datetime import datetime, time
+from datetime import date, datetime, time
 from pathlib import Path
 
 ZONE_PATH = (
@@ -28,8 +28,20 @@ zone_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(zone_mod)
 
 SprinklerSchedule = zone_mod.SprinklerSchedule
+SprinklerSystem = zone_mod.SprinklerSystem
 Zone = zone_mod.Zone
 ZoneSettings = zone_mod.ZoneSettings
+
+
+def _serialize_zone(zone):
+    """Mirror the per-zone storage serialize shape in _save_system_data."""
+    return {
+        "total_runtime_today": zone.total_runtime_today,
+        "total_water_used_today": zone.total_water_used_today,
+        "last_watering_date": (
+            zone.last_watering_date.isoformat() if zone.last_watering_date else None
+        ),
+    }
 
 
 def _serialize(schedule):
@@ -133,3 +145,76 @@ def test_real_run_records_activity():
     zone.stop_watering()
     assert zone.state == "idle"
     assert zone.last_watering_date is not None
+
+
+def test_zone_last_watering_date_round_trips():
+    """FIX B: per-zone last_watering_date persists across serialize -> restore."""
+    ran_at = datetime(2026, 6, 1, 21, 5, 0)
+    zone = Zone(zone_id=4, settings=ZoneSettings(name="Zone 4"))
+    zone.last_watering_date = ran_at
+    zone.total_runtime_today = 12
+
+    stored = _serialize_zone(zone)
+    assert "last_watering_date" in stored  # key PRESENT (was absent before)
+    assert stored["last_watering_date"] == ran_at.isoformat()
+
+    raw = stored.get("last_watering_date")
+    restored = Zone(zone_id=4, settings=ZoneSettings(name="Zone 4"))
+    if raw:
+        restored.last_watering_date = datetime.fromisoformat(raw)
+    assert restored.last_watering_date == ran_at
+
+
+def test_zone_last_watering_date_none_round_trips():
+    """FIX B: a never-run zone serializes last_watering_date as None present."""
+    zone = Zone(zone_id=1, settings=ZoneSettings(name="Zone 1"))
+    stored = _serialize_zone(zone)
+    assert "last_watering_date" in stored
+    assert stored["last_watering_date"] is None
+
+
+def test_stats_date_round_trips():
+    """FIX A: system stats_date persists across serialize -> restore."""
+    today = date(2026, 6, 2)
+    system = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    system.stats_date = today
+
+    serialized = system.stats_date.isoformat() if system.stats_date else None
+    assert serialized == today.isoformat()
+
+    restored = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    if serialized:
+        restored.stats_date = date.fromisoformat(serialized)
+    assert restored.stats_date == today
+
+
+def test_reset_daily_stats_on_day_change():
+    """FIX A: daily totals zero out only on a genuine date change."""
+    system = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    # Stale stats from a prior day (e.g. zone 4 runtime_today=2).
+    system.stats_date = date(2026, 6, 1)
+    system.zones[4].total_runtime_today = 2
+    system.zones[4].total_water_used_today = 3.5
+    system.total_runtime_today = 2
+
+    # Same day -> no reset.
+    assert system.reset_daily_stats_if_new_day(date(2026, 6, 1)) is False
+    assert system.zones[4].total_runtime_today == 2
+
+    # New day -> reset all daily totals and advance stats_date.
+    assert system.reset_daily_stats_if_new_day(date(2026, 6, 2)) is True
+    assert system.zones[4].total_runtime_today == 0
+    assert system.zones[4].total_water_used_today == 0.0
+    assert system.total_runtime_today == 0
+    assert system.stats_date == date(2026, 6, 2)
+
+
+def test_reset_daily_stats_first_run_preserves_restored_stats():
+    """FIX A: first cycle (stats_date None) adopts today without wiping stats."""
+    system = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    system.zones[4].total_runtime_today = 2  # restored from storage
+    assert system.stats_date is None
+
+    assert system.reset_daily_stats_if_new_day(date(2026, 6, 2)) is False
+    assert system.stats_date == date(2026, 6, 2)
+    assert system.zones[4].total_runtime_today == 2  # NOT wiped on first run
