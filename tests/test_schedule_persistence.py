@@ -218,3 +218,80 @@ def test_reset_daily_stats_first_run_preserves_restored_stats():
     assert system.reset_daily_stats_if_new_day(date(2026, 6, 2)) is False
     assert system.stats_date == date(2026, 6, 2)
     assert system.zones[4].total_runtime_today == 2  # NOT wiped on first run
+
+
+def _reconcile_load_time_stats(system, today):
+    """Mirror the load-time stats reconciliation in __init__.async_setup_entry.
+
+    Description:
+        Pure reimplementation of the restart/migration fix: if no zone watered
+        today, zero every daily total and anchor stats_date; otherwise preserve
+        the restored same-day totals. Kept in lockstep with the production block
+        so the regression test exercises identical logic without importing the
+        full Home Assistant runtime.
+    Inputs:
+        system (SprinklerSystem): the freshly restored system object.
+        today (date): the current calendar date.
+    Outputs:
+        None.
+    """
+    watered_today = any(
+        z.last_watering_date is not None and z.last_watering_date.date() == today
+        for z in system.zones.values()
+    )
+    if not watered_today:
+        for zone in system.zones.values():
+            zone.total_runtime_today = 0
+            zone.total_water_used_today = 0.0
+        system.total_runtime_today = 0
+        system.total_water_used_today = 0.0
+    system.stats_date = today
+
+
+def test_load_time_reset_when_nothing_watered_today():
+    """THE FIX: stale stats + no watering today -> daily totals reset to 0.
+
+    Reproduces the confirmed live bug: storage carries last night's per-zone
+    runtime but no zone's last_watering_date is today, so a load must zero them.
+    """
+    today = date(2026, 6, 2)
+    system = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    # Stale totals from last night's run (06-01 21:00); last_watering_date None
+    # (as observed live -- it was never persisted before the prior fix).
+    system.zones[1].total_runtime_today = 29
+    system.zones[2].total_runtime_today = 16
+    system.zones[4].total_runtime_today = 2
+    system.zones[4].total_water_used_today = 3.5
+    system.total_runtime_today = 80
+    system.total_water_used_today = 50.0
+    # stats_date already adopted as today by the (buggy) first-load path.
+    system.stats_date = today
+
+    _reconcile_load_time_stats(system, today)
+
+    assert all(z.total_runtime_today == 0 for z in system.zones.values())
+    assert all(z.total_water_used_today == 0.0 for z in system.zones.values())
+    assert system.total_runtime_today == 0
+    assert system.total_water_used_today == 0.0
+    assert system.stats_date == today
+
+
+def test_load_time_preserves_stats_when_watered_today():
+    """THE FIX: a same-day restart after a real run keeps today's stats."""
+    today = date(2026, 6, 2)
+    system = SprinklerSystem(system_name="Test", entity_id="sensor.test")
+    # Zone 1 genuinely watered today -> last_watering_date is today.
+    system.zones[1].total_runtime_today = 15
+    system.zones[1].total_water_used_today = 12.0
+    system.zones[1].last_watering_date = datetime(2026, 6, 2, 21, 5, 0)
+    system.total_runtime_today = 15
+    system.total_water_used_today = 12.0
+    system.stats_date = today
+
+    _reconcile_load_time_stats(system, today)
+
+    # Same-day stats preserved across the restart.
+    assert system.zones[1].total_runtime_today == 15
+    assert system.zones[1].total_water_used_today == 12.0
+    assert system.total_runtime_today == 15
+    assert system.stats_date == today

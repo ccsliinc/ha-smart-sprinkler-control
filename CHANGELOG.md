@@ -2,6 +2,24 @@
 
 All notable changes to Smart Sprinkler Control are documented here.
 
+## [2025.1.4] - 2026-06-02
+
+### Fixed
+
+- **Stale "water time today" on restart/migration.** The day-rollover reset in
+  the coordinator only fires when `stats_date` *changes*, so on a first load
+  that adopted `stats_date=today` (migration or fresh restore) it kept the
+  previous day's per-zone `total_runtime_today` /
+  `total_water_used_today` labelled as "today" until the next midnight. Confirmed
+  live: zones showed last night's run (zone1=29, zone2=16, ...) on a morning when
+  nothing had watered. `async_setup_entry` now reconciles daily totals at load:
+  it checks whether any zone's `last_watering_date` is actually today and, if
+  NOT, zeroes every zone's daily totals plus the system daily totals and anchors
+  `stats_date=today`. If watering DID happen today, legitimate same-day stats are
+  preserved across the restart. The coordinator's
+  `reset_daily_stats_if_new_day` is unchanged for the HA-stays-up-across-midnight
+  case. (`__init__.py` `async_setup_entry`)
+
 ## [2025.1.3] - 2026-06-02
 
 ### Fixed

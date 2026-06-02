@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, Optional, cast
 
 import voluptuous as vol
@@ -427,6 +427,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except (ValueError, TypeError):
                 system.stats_date = None
                 _LOGGER.warning("Could not parse stored stats_date %r", stats_date_raw)
+
+    # Load-time daily-stats reconciliation (the root-cause fix for stale
+    # "water time today" on restart/migration). The coordinator's day-rollover
+    # reset only fires on a stats_date CHANGE, so on a first load that adopts
+    # stats_date=today it would keep yesterday's totals labelled "today".
+    #
+    # Reliable signal: if NOTHING actually watered today, today's totals MUST be
+    # zero. A zone watered today iff its last_watering_date is today.
+    today = date.today()
+    watered_today = any(
+        z.last_watering_date is not None and z.last_watering_date.date() == today
+        for z in system.zones.values()
+    )
+    if not watered_today:
+        # Nothing ran today: wipe any stale per-zone and system daily totals.
+        for zone in system.zones.values():
+            zone.total_runtime_today = 0
+            zone.total_water_used_today = 0.0
+        system.total_runtime_today = 0
+        system.total_water_used_today = 0.0
+        _LOGGER.info(
+            "Startup stats reconciliation: no watering today, daily totals "
+            "reset to 0 for %s",
+            today.isoformat(),
+        )
+    else:
+        # Genuine same-day stats (e.g. a restart after tonight's run): keep them.
+        _LOGGER.debug(
+            "Startup stats reconciliation: watering occurred today, preserving "
+            "restored daily totals for %s",
+            today.isoformat(),
+        )
+    # Anchor stats_date to today either way, so the coordinator rollover triggers
+    # cleanly at the next real day change rather than re-wiping mid-day.
+    system.stats_date = today
 
     # Log final zone configuration after all setup
     _LOGGER.info("Final zone configuration for %s:", system_name)
