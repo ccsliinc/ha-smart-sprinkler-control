@@ -1710,7 +1710,7 @@
   var zoneCardMethods = {
     renderHeader() {
       const systemName = this._selectedSystem?.attributes?.system_name || this._selectedSystem?.attributes?.friendly_name || "Sprinkler System";
-      const isAnyZoneActive = this.dataManager.getZones().some((z) => z.state === "watering" || z.is_running);
+      const isAnyZoneActive = this.dataManager.getZones().some((z) => z.state === "watering" && z.is_running);
       return `
     <div class="panel-header">
       <h1>${systemName}</h1>
@@ -1728,7 +1728,7 @@
         return `<p>No zones configured.</p>`;
       }
       const zoneCards = zones.map((zone) => {
-        const isActive = zone.state === "watering" || zone.is_running;
+        const isActive = zone.state === "watering" && zone.is_running;
         const isDisabled = !zone.enabled;
         const isScheduled = zone.state === "scheduled";
         const isRainDelayed = zone.state === "rain_delayed";

@@ -8,9 +8,13 @@ export const zoneCardMethods = {
       this._selectedSystem?.attributes?.system_name ||
       this._selectedSystem?.attributes?.friendly_name ||
       'Sprinkler System';
+    // Activity is sourced ONLY from the backend zone model (state === 'watering').
+    // We deliberately do NOT look at the underlying switch entity's state or
+    // last_changed, so an ESPHome reconnect (unavailable -> off) or the safety
+    // all-off can never be mistaken for a zone being active.
     const isAnyZoneActive = this.dataManager
       .getZones()
-      .some((z) => z.state === 'watering' || z.is_running);
+      .some((z) => z.state === 'watering' && z.is_running);
 
     return `
     <div class="panel-header">
@@ -38,7 +42,9 @@ export const zoneCardMethods = {
 
     const zoneCards = zones
       .map((zone) => {
-        const isActive = zone.state === 'watering' || zone.is_running;
+        // Backend-driven activity only (see renderHeader): availability
+        // transitions on the switch entity never count as "active".
+        const isActive = zone.state === 'watering' && zone.is_running;
         const isDisabled = !zone.enabled;
         const isScheduled = zone.state === 'scheduled';
         const isRainDelayed = zone.state === 'rain_delayed';

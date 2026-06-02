@@ -355,9 +355,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         skip_if_rain=schedule_data.get("skip_if_rain", True),
                         rain_threshold=schedule_data.get("rain_threshold", 0.1),
                     )
-                    # SAFETY: On restore, if start time already passed today,
-                    # set last_run_date to prevent auto-run on startup
-                    if now.time() >= schedule_time:
+                    # Restore the persisted last_run_date (ISO string or None) so a
+                    # schedule that already ran today survives a restart and is not
+                    # re-run. This is the root-cause fix for "re-runs on restart".
+                    last_run_raw = schedule_data.get("last_run_date")
+                    if last_run_raw:
+                        try:
+                            schedule.last_run_date = datetime.fromisoformat(
+                                last_run_raw
+                            )
+                        except (ValueError, TypeError):
+                            schedule.last_run_date = None
+                            _LOGGER.warning(
+                                "Schedule %s: could not parse stored "
+                                "last_run_date %r",
+                                schedule_id,
+                                last_run_raw,
+                            )
+                    # SAFETY: if the start time already passed today and we have no
+                    # last_run_date marking today (none stored, or stored value is
+                    # from a previous day), mark it run-today to prevent a catch-up
+                    # auto-run on startup. A genuine "ran today" marker is preserved.
+                    if now.time() >= schedule_time and (
+                        schedule.last_run_date is None
+                        or schedule.last_run_date.date() != now.date()
+                    ):
                         schedule.last_run_date = now
                         _LOGGER.debug(
                             "Schedule %s: marking as run today (startup safety)",
@@ -535,6 +557,13 @@ async def _save_system_data(system: SprinklerSystem, store: Store) -> None:
                 "zone_durations": schedule.zone_durations,
                 "skip_if_rain": schedule.skip_if_rain,
                 "rain_threshold": schedule.rain_threshold,
+                # Persist last_run_date so a schedule that already ran today is
+                # not re-run after an HA restart. Stored as ISO string (or None).
+                "last_run_date": (
+                    schedule.last_run_date.isoformat()
+                    if schedule.last_run_date
+                    else None
+                ),
             }
 
         data = {
@@ -957,11 +986,27 @@ async def _register_services(hass: HomeAssistant) -> None:
                 "Schedule %s: preserving last_run_date from existing schedule",
                 schedule_id,
             )
-        elif now.time() >= schedule_time:
-            # New schedule: if start time already passed today, mark as run
+
+        # Catch-up guard (applies to BOTH new and edited schedules):
+        # If the schedule is enabled and its start time has ALREADY PASSED today,
+        # mark it satisfied-for-today so saving/enabling it now does NOT trigger an
+        # immediate catch-up run. It will instead wait for its NEXT occurrence.
+        # Only do this when last_run_date is unset or stale (not already today) so
+        # we never clobber a genuine "ran today" marker. When the start time is
+        # still in the FUTURE today, leave last_run_date untouched so the schedule
+        # runs at its time today as intended.
+        if (
+            schedule.enabled
+            and now.time() >= schedule_time
+            and (
+                schedule.last_run_date is None
+                or schedule.last_run_date.date() != now.date()
+            )
+        ):
             schedule.last_run_date = now
             _LOGGER.debug(
-                "Schedule %s: start time already passed, marking as run today",
+                "Schedule %s: start time already passed today, marking "
+                "satisfied-for-today to prevent catch-up run",
                 schedule_id,
             )
 

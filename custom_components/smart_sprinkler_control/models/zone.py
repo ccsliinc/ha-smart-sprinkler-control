@@ -93,19 +93,27 @@ class Zone:
         remaining_queue = self.schedule_queue.copy()
         schedule_id = self.current_schedule_id
 
+        # Only count this as real watering activity if the session actually
+        # started (had a start_time). This guards "last run" and runtime stats
+        # against being polluted by availability transitions (e.g. an ESPHome
+        # controller reconnecting and flipping switches unavailable->off, or the
+        # safety all-off path) which must never register as a watering run.
+        real_session = self.start_time is not None
+
         self.state = "idle"
         self.start_time = None
         self.end_time = None
         self.remaining_duration = 0
         self.current_schedule_id = None
         self.schedule_queue = []  # Clear the queue
-        self.last_watering_date = datetime.now()
 
-        # Update statistics
-        self.total_runtime_today += actual_runtime
-        self.total_runtime_week += actual_runtime
-        self.total_water_used_today += water_used
-        self.total_water_used_week += water_used
+        if real_session:
+            # Reflect ONLY actual watering in last-run/activity and statistics.
+            self.last_watering_date = datetime.now()
+            self.total_runtime_today += actual_runtime
+            self.total_runtime_week += actual_runtime
+            self.total_water_used_today += water_used
+            self.total_water_used_week += water_used
 
         _LOGGER.info(
             "Stopped watering zone %d after %d minutes, used %.1f gallons",
