@@ -9,7 +9,13 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
-from .const import DEFAULT_ZONE_COUNT, DOMAIN
+from .const import (
+    CONF_ZONE_COUNT,
+    CONF_ZONE_NAMES,
+    CONF_ZONE_SWITCHES,
+    DEFAULT_ZONE_COUNT,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -260,24 +266,82 @@ class SmartSprinklerManagerConfigFlow(
 
 
 class SmartSprinklerManagerOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow for Smart Sprinkler Manager."""
+    """Handle options flow for Smart Sprinkler Manager.
+
+    Multi-step reconfiguration that mirrors the install flow so a user can
+    change zone count, per-zone names, and per-zone switch entities after
+    install, plus weather/rain-delay preferences — all without deleting and
+    re-adding the integration.
+
+    PERSISTENCE DECISION:
+        Zone *topology* (zone_count / zone_names / zone_switches) is canonical
+        "what the device IS" data, so it is written back to ``entry.data`` via
+        ``hass.config_entries.async_update_entry``. ``async_setup_entry`` already
+        reads zone config exclusively from ``entry.data``, so on the reload that
+        follows the save it picks up the new topology with no extra merge logic.
+        User *preferences* (enable_weather_integration, weather_entity,
+        rain_sensor_entity, rain_delay_hours) stay in ``entry.options`` — they are
+        read live elsewhere (e.g. rain_delay_hours via _get_options_for_system)
+        and must not force a reload. The reload listener (async_reload_entry in
+        __init__.py) fires on the options update and applies the new topology.
+    """
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        """Initialize options flow.
+
+        NOTE: do NOT assign ``self.config_entry`` — in current Home Assistant it
+        is a read-only property the framework injects, and assigning it raises
+        AttributeError. The entry is read via ``self.config_entry`` everywhere.
+        """
+        # Working copies collected across steps before the final save.
+        self._zone_count: int = config_entry.data.get(
+            CONF_ZONE_COUNT, DEFAULT_ZONE_COUNT
+        )
+        self._zone_names: Dict[int, str] = {}
+        self._zone_switches: Dict[int, str] = {}
+        self._prefs: Dict[str, Any] = {}
+
+    @staticmethod
+    def _normalize_map(raw: Any) -> Dict[int, Any]:
+        """Coerce a stored zone map (int or str keys) to int-keyed dict."""
+        result: Dict[int, Any] = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                try:
+                    result[int(key)] = value
+                except (ValueError, TypeError):
+                    continue
+        return result
 
     async def async_step_init(
         self, user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
-        """Manage the options."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
-
-        # Get current configuration
+        """Step 1: preferences + desired zone count."""
         current_options = self.config_entry.options
+        current_count = self.config_entry.data.get(CONF_ZONE_COUNT, DEFAULT_ZONE_COUNT)
+
+        if user_input is not None:
+            self._zone_count = int(user_input["zone_count"])
+            self._prefs = {
+                "enable_weather_integration": user_input.get(
+                    "enable_weather_integration", False
+                ),
+                "rain_delay_hours": int(user_input.get("rain_delay_hours", 24)),
+            }
+            return await self.async_step_zones()
 
         data_schema = vol.Schema(
             {
+                vol.Required(
+                    "zone_count", default=current_count
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        mode=selector.NumberSelectorMode.BOX,
+                        min=1,
+                        max=32,
+                        step=1,
+                    )
+                ),
                 vol.Optional(
                     "enable_weather_integration",
                     default=current_options.get("enable_weather_integration", False),
@@ -294,22 +358,78 @@ class SmartSprinklerManagerOptionsFlow(config_entries.OptionsFlow):
                         unit_of_measurement="hours",
                     )
                 ),
-                vol.Optional(
-                    "soil_moisture_threshold",
-                    default=current_options.get("soil_moisture_threshold", 80),
-                ): selector.NumberSelector(
-                    selector.NumberSelectorConfig(
-                        mode=selector.NumberSelectorMode.BOX,
-                        min=0,
-                        max=100,
-                        step=5,
-                        unit_of_measurement="%",
-                    )
-                ),
             }
         )
 
-        return self.async_show_form(
-            step_id="init",
-            data_schema=data_schema,
+        return self.async_show_form(step_id="init", data_schema=data_schema)
+
+    async def async_step_zones(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Step 2: per-zone names, pre-filled with current values."""
+        current_names = self._normalize_map(
+            self.config_entry.data.get(CONF_ZONE_NAMES, {})
         )
+
+        if user_input is not None:
+            for i in range(1, self._zone_count + 1):
+                name = (user_input.get(f"zone_{i}_name") or f"Zone {i}").strip()
+                self._zone_names[i] = name or f"Zone {i}"
+            return await self.async_step_zone_switches()
+
+        schema_dict = {}
+        for i in range(1, self._zone_count + 1):
+            default_name = current_names.get(i, f"Zone {i}")
+            schema_dict[vol.Optional(f"zone_{i}_name", default=default_name)] = str
+        return self.async_show_form(
+            step_id="zones",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={"zone_count": str(self._zone_count)},
+        )
+
+    async def async_step_zone_switches(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Step 3: per-zone switch entities, pre-filled, then save."""
+        current_switches = self._normalize_map(
+            self.config_entry.data.get(CONF_ZONE_SWITCHES, {})
+        )
+
+        if user_input is not None:
+            for i in range(1, self._zone_count + 1):
+                switch = user_input.get(f"zone_{i}_switch")
+                if switch:
+                    self._zone_switches[i] = switch
+            return await self._save()
+
+        schema_dict = {}
+        for i in range(1, self._zone_count + 1):
+            field = vol.Optional(f"zone_{i}_switch")
+            if i in current_switches:
+                field = vol.Optional(f"zone_{i}_switch", default=current_switches[i])
+            schema_dict[field] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch")
+            )
+        return self.async_show_form(
+            step_id="zone_switches",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={"zone_count": str(self._zone_count)},
+        )
+
+    async def _save(self) -> FlowResult:
+        """Persist zone topology to entry.data and prefs to entry.options.
+
+        Zone topology goes to ``entry.data`` (canonical device config that
+        ``async_setup_entry`` reads on reload). Switch/name maps are stored with
+        string keys to match how the install flow / YAML import store them and
+        how ``async_setup_entry`` reads them. Preferences are returned as the
+        options entry; the resulting options update triggers async_reload_entry.
+        """
+        new_data = {
+            **self.config_entry.data,
+            CONF_ZONE_COUNT: self._zone_count,
+            CONF_ZONE_NAMES: {str(k): v for k, v in self._zone_names.items()},
+            CONF_ZONE_SWITCHES: {str(k): v for k, v in self._zone_switches.items()},
+        }
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
+        return self.async_create_entry(title="", data=self._prefs)

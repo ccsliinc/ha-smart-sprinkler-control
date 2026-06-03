@@ -67,7 +67,7 @@ class Zone:
         self.remaining_duration = duration
         self.current_schedule_id = schedule_id
 
-        _LOGGER.info("Started watering zone %d for %d minutes", self.zone_id, duration)
+        _LOGGER.debug("Started watering zone %d for %d minutes", self.zone_id, duration)
         return True
 
     def stop_watering(self) -> tuple:
@@ -115,7 +115,7 @@ class Zone:
             self.total_water_used_today += water_used
             self.total_water_used_week += water_used
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Stopped watering zone %d after %d minutes, used %.1f gallons",
             self.zone_id,
             actual_runtime,
@@ -278,8 +278,127 @@ class SprinklerSystem:
         self.total_runtime_today = 0
         self.total_water_used_today = 0.0
         self.stats_date = today
-        _LOGGER.info("Daily sprinkler statistics reset for %s", today.isoformat())
+        _LOGGER.debug("Daily sprinkler statistics reset for %s", today.isoformat())
         return True
+
+    def add_zone(
+        self,
+        zone_id: int,
+        name: Optional[str] = None,
+        switch_entity: Optional[str] = None,
+    ) -> Zone:
+        """Add a new zone to the system.
+
+        Description:
+            Creates a fresh Zone with sane defaults and the supplied name/switch,
+            registers it in ``self.zones`` and bumps ``zone_count`` so the system
+            topology reflects the new zone. Idempotent: re-adding an existing
+            zone_id updates its name/switch instead of clobbering its state.
+        Inputs:
+            zone_id: 1-based identifier for the new zone.
+            name: Display name; defaults to ``f"Zone {zone_id}"`` when falsy.
+            switch_entity: HA switch entity that drives this zone's valve.
+        Outputs:
+            Zone: the created (or updated) zone object.
+        """
+        if zone_id in self.zones:
+            zone = self.zones[zone_id]
+            if name:
+                zone.settings.name = name
+            if switch_entity is not None:
+                zone.settings.switch_entity = switch_entity
+        else:
+            settings = ZoneSettings(name=name or f"Zone {zone_id}")
+            settings.switch_entity = switch_entity
+            zone = Zone(zone_id=zone_id, settings=settings)
+            self.zones[zone_id] = zone
+            _LOGGER.info("Added zone %d (%s)", zone_id, zone.settings.name)
+
+        # Keep zone_count in sync with the highest configured zone so summary
+        # data and range-based callers stay consistent.
+        self.zone_count = max(self.zone_count, len(self.zones))
+        return zone
+
+    def remove_zone(self, zone_id: int) -> bool:
+        """Remove a zone and purge all references to it.
+
+        Description:
+            Stops the zone if running, deletes it from ``self.zones`` and scrubs
+            its id from every schedule (both ``zone_ids`` and ``zone_durations``)
+            so no schedule can reference a non-existent zone after removal. Also
+            recomputes ``zone_count`` from the surviving zones.
+        Inputs:
+            zone_id: identifier of the zone to remove.
+        Outputs:
+            bool: True if a zone was removed, False if it did not exist.
+        """
+        if zone_id not in self.zones:
+            _LOGGER.warning("Cannot remove zone %d: does not exist", zone_id)
+            return False
+
+        zone = self.zones[zone_id]
+        if zone.is_watering():
+            zone.stop_watering()
+
+        del self.zones[zone_id]
+
+        # Purge this zone from every schedule so no orphan references remain.
+        for schedule in self.schedules.values():
+            if zone_id in schedule.zone_ids:
+                schedule.zone_ids = [z for z in schedule.zone_ids if z != zone_id]
+            schedule.zone_durations.pop(zone_id, None)
+
+        # zone_count tracks the live topology after removal.
+        self.zone_count = len(self.zones)
+        _LOGGER.info("Removed zone %d and purged schedule references", zone_id)
+        return True
+
+    def reconcile_zones(
+        self,
+        zone_count: int,
+        zone_names: Dict[Any, str],
+        zone_switches: Dict[Any, str],
+    ) -> None:
+        """Make the live zones dict match the requested config topology.
+
+        Description:
+            Config is authoritative for topology. This grows/shrinks ``self.zones``
+            to exactly zones ``1..zone_count``: adds missing zones (with provided
+            name/switch), removes zones above ``zone_count`` (purging schedule
+            references), and updates name/switch on surviving zones. Existing zone
+            state/statistics on surviving zones are preserved.
+        Inputs:
+            zone_count: desired number of zones (zones 1..zone_count).
+            zone_names: map of zone_id -> display name (int or str keys tolerated).
+            zone_switches: map of zone_id -> switch entity (int or str keys).
+        Outputs:
+            None.
+        """
+
+        def _lookup(mapping: Dict[Any, Any], zid: int) -> Optional[Any]:
+            if zid in mapping:
+                return mapping[zid]
+            return mapping.get(str(zid))
+
+        # Remove zones above the new count (highest-numbered first).
+        for existing_id in sorted(self.zones.keys(), reverse=True):
+            if existing_id > zone_count:
+                self.remove_zone(existing_id)
+
+        # Add or update zones 1..zone_count.
+        for zid in range(1, zone_count + 1):
+            name = _lookup(zone_names, zid)
+            switch = _lookup(zone_switches, zid)
+            if zid in self.zones:
+                zone = self.zones[zid]
+                if name:
+                    zone.settings.name = name
+                # switch may legitimately be cleared (None) by the user.
+                zone.settings.switch_entity = switch
+            else:
+                self.add_zone(zid, name=name, switch_entity=switch)
+
+        self.zone_count = zone_count
 
     def get_active_zones(self) -> List[Zone]:
         """Get list of currently watering zones."""
@@ -327,7 +446,7 @@ class SprinklerSystem:
         active_zones = self.get_active_zones()
         if active_zones:
             for active_zone in active_zones:
-                _LOGGER.info(
+                _LOGGER.debug(
                     "Stopping zone %d to start zone %d (single-zone operation)",
                     active_zone.zone_id,
                     zone_id,

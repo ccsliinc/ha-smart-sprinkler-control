@@ -1431,6 +1431,22 @@
       }
     },
     _renderRainGraph() {
+      if (this._noPrecipSensor) {
+        return `
+    <div class="rain-graph-container" style="
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-sizing: border-box;
+    ">
+      <div style="color: #888; font-size: 12px; text-align: center;">
+        No precipitation sensor configured.
+      </div>
+    </div>
+  `;
+      }
       const unit = this._rainUnit || "in";
       return `
     <div class="rain-graph-container" style="
@@ -1463,7 +1479,7 @@
      */
     async _getRainData() {
       if (!this._hass) {
-        console.log("[SSC] No hass available");
+        if (this._isDebugEnabled?.()) console.log("[SSC] No hass available");
         return this._getEmptyRainData("no hass");
       }
       try {
@@ -1473,11 +1489,15 @@
           return this._getEmptyRainData("api error");
         }
         const data = await response.json();
-        console.log("[SSC] Precipitation data from API:", data);
+        if (this._isDebugEnabled?.()) {
+          console.log("[SSC] Precipitation data from API:", data);
+        }
         if (data.error) {
           console.warn("[SSC] API returned error:", data.error);
+          this._noPrecipSensor = data.error === "No precipitation sensors found";
           return this._getEmptyRainData(data.error);
         }
+        this._noPrecipSensor = false;
         const labels = data.hourly.map((h) => h.hour);
         const chartData = data.hourly.map((h) => h.total);
         const hasRain = data.sensors?.rain?.length > 0;
@@ -1594,6 +1614,14 @@
         return;
       }
       const rainData = await this._getCachedRainData();
+      if (this._noPrecipSensor) {
+        if (this._rainChart) {
+          this._rainChart.destroy();
+          this._rainChart = null;
+        }
+        this.render();
+        return;
+      }
       if (this._rainChart && this._rainChart.canvas === canvas) {
         this._applyRainData(rainData);
         return;
@@ -2925,22 +2953,6 @@
       }
     }
     /**
-     * Show zone settings modal/panel (placeholder for future implementation).
-     *
-     * @param {number} zoneId - The zone ID to show settings for
-     */
-    showZoneSettings(zoneId) {
-      console.log("[SSC] showZoneSettings called for zone:", zoneId);
-      const zones = this.dataManager.getZones();
-      const zone = zones.find((z) => z.id === zoneId);
-      if (zone) {
-        console.log("[SSC] Zone settings:", zone);
-        alert(`Zone Settings for "${zone.name || `Zone ${zone.id}`}"
-
-Settings panel coming soon!`);
-      }
-    }
-    /**
      * Adjust the remaining time for a currently running zone.
      *
      * @param {number} zoneId - The zone ID to adjust
@@ -3072,7 +3084,7 @@ Settings panel coming soon!`);
       ${this.renderZones()}
       ${this.renderSchedules()}
       ${this.renderWeather()}
-      ${this.renderDebugSection()}
+      ${this._isDebugEnabled() ? this.renderDebugSection() : ""}
     </div>
     ${this.renderDurationModal()}
     ${this.renderZoneSettingsModal()}
@@ -3082,6 +3094,23 @@ Settings panel coming soon!`);
       this._loadChartJs().then(() => {
         setTimeout(async () => await this._initRainChart(), 50);
       });
+    }
+    /**
+     * Whether the developer debug UI/logging is enabled for this browser.
+     *
+     * Gated so normal HACS users never see the raw entity chips or the bulk
+     * "Stop All" toggle. A developer opts in from the console with
+     * `localStorage.setItem('ssc_debug','1')` (then refresh), or by appending
+     * `?debug` to the panel URL for a one-off session.
+     *
+     * @returns {boolean} True when debug output should be rendered/logged.
+     */
+    _isDebugEnabled() {
+      try {
+        if (localStorage.getItem("ssc_debug") === "1") return true;
+      } catch (e) {
+      }
+      return window.location.search.includes("debug");
     }
     renderDebugSection() {
       if (!this._hass) return "";

@@ -25,6 +25,26 @@ export const rainChartMethods = {
   },
 
   _renderRainGraph() {
+    // When the backend reports zero precipitation sensors (genuine no-sensor
+    // case, NOT a transient fetch error), replace the chart with a small muted
+    // note instead of a permanently flat zero graph that looks broken.
+    if (this._noPrecipSensor) {
+      return `
+    <div class="rain-graph-container" style="
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(0, 255, 255, 0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      box-sizing: border-box;
+    ">
+      <div style="color: #888; font-size: 12px; text-align: center;">
+        No precipitation sensor configured.
+      </div>
+    </div>
+  `;
+    }
+
     // Default to in until the API tells us otherwise; _rainUnit is set on
     // every successful fetch so subsequent renders reflect the real sensor
     // unit (mm on metric HA installs, in on imperial).
@@ -62,7 +82,7 @@ export const rainChartMethods = {
    */
   async _getRainData() {
     if (!this._hass) {
-      console.log('[SSC] No hass available');
+      if (this._isDebugEnabled?.()) console.log('[SSC] No hass available');
       return this._getEmptyRainData('no hass');
     }
 
@@ -71,17 +91,28 @@ export const rainChartMethods = {
       const response = await fetch('/api/smart_sprinkler_control/precipitation');
 
       if (!response.ok) {
+        // Transient/network/server error: keep the section visible (the chart
+        // will show last-known or empty data) rather than hiding it.
         console.warn('[SSC] Precipitation API error:', response.status);
         return this._getEmptyRainData('api error');
       }
 
       const data = await response.json();
-      console.log('[SSC] Precipitation data from API:', data);
+      if (this._isDebugEnabled?.()) {
+        console.log('[SSC] Precipitation data from API:', data);
+      }
 
       if (data.error) {
         console.warn('[SSC] API returned error:', data.error);
+        // Distinguish a genuine "no sensor configured" state (the section is
+        // hidden, see _renderRainGraph) from transient errors. The backend
+        // returns this exact string only when discovery finds zero sensors.
+        this._noPrecipSensor = data.error === 'No precipitation sensors found';
         return this._getEmptyRainData(data.error);
       }
+
+      // A successful fetch with sensors present clears any prior no-sensor state.
+      this._noPrecipSensor = false;
 
       // Convert API response to chart format
       const labels = data.hourly.map(h => h.hour);
@@ -229,6 +260,19 @@ export const rainChartMethods = {
     // Fetch (throttled/cached) BEFORE deciding to rebuild, so we never
     // fetch more than once per interval regardless of render frequency.
     const rainData = await this._getCachedRainData();
+
+    // The first render paints the chart before the fetch resolves. If that
+    // fetch revealed there is genuinely no precipitation sensor, re-render
+    // once so _renderRainGraph swaps the chart for the muted note. The note
+    // has no #rainChart canvas, so the early-return above prevents any loop.
+    if (this._noPrecipSensor) {
+      if (this._rainChart) {
+        this._rainChart.destroy();
+        this._rainChart = null;
+      }
+      this.render();
+      return;
+    }
 
     // If a live chart already exists on this exact canvas, just update
     // its data — no destroy/recreate. This is the flicker fix.

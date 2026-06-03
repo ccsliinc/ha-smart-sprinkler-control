@@ -537,23 +537,6 @@ class SmartSprinklerControlPanel extends HTMLElement {
   }
 
   /**
-   * Show zone settings modal/panel (placeholder for future implementation).
-   *
-   * @param {number} zoneId - The zone ID to show settings for
-   */
-  showZoneSettings(zoneId) {
-    console.log('[SSC] showZoneSettings called for zone:', zoneId);
-    // TODO: Implement zone settings modal
-    // For now, just log the action
-    const zones = this.dataManager.getZones();
-    const zone = zones.find(z => z.id === zoneId);
-    if (zone) {
-      console.log('[SSC] Zone settings:', zone);
-      alert(`Zone Settings for "${zone.name || `Zone ${zone.id}`}"\n\nSettings panel coming soon!`);
-    }
-  }
-
-  /**
    * Adjust the remaining time for a currently running zone.
    *
    * @param {number} zoneId - The zone ID to adjust
@@ -717,7 +700,7 @@ class SmartSprinklerControlPanel extends HTMLElement {
       ${this.renderZones()}
       ${this.renderSchedules()}
       ${this.renderWeather()}
-      ${this.renderDebugSection()}
+      ${this._isDebugEnabled() ? this.renderDebugSection() : ''}
     </div>
     ${this.renderDurationModal()}
     ${this.renderZoneSettingsModal()}
@@ -730,6 +713,25 @@ class SmartSprinklerControlPanel extends HTMLElement {
     this._loadChartJs().then(() => {
       setTimeout(async () => await this._initRainChart(), 50);
     });
+  }
+
+  /**
+   * Whether the developer debug UI/logging is enabled for this browser.
+   *
+   * Gated so normal HACS users never see the raw entity chips or the bulk
+   * "Stop All" toggle. A developer opts in from the console with
+   * `localStorage.setItem('ssc_debug','1')` (then refresh), or by appending
+   * `?debug` to the panel URL for a one-off session.
+   *
+   * @returns {boolean} True when debug output should be rendered/logged.
+   */
+  _isDebugEnabled() {
+    try {
+      if (localStorage.getItem('ssc_debug') === '1') return true;
+    } catch (e) {
+      // localStorage may be unavailable (privacy mode); fall through to URL.
+    }
+    return window.location.search.includes('debug');
   }
 
   renderDebugSection() {

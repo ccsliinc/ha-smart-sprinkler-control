@@ -78,17 +78,45 @@
   "options": {
     "step": {
       "init": {
-        "title": "Options",
-        "description": "Configure advanced settings for your sprinkler system.",
+        "title": "Sprinkler Options",
+        "description": "Reconfigure your sprinkler system. Set the number of zones and adjust weather/rain-delay preferences. The next steps let you name each zone and assign its switch.",
         "data": {
+          "zone_count": "Number of Zones",
           "enable_weather_integration": "Enable Weather Integration",
-          "rain_delay_hours": "Rain Delay Duration (hours)",
-          "soil_moisture_threshold": "Soil Moisture Skip Threshold (%)"
+          "rain_delay_hours": "Rain Delay Duration (hours)"
         },
         "data_description": {
+          "zone_count": "Add or remove zones (1-32). Removing zones drops the highest-numbered ones.",
           "enable_weather_integration": "Automatically delay watering based on weather forecasts",
-          "rain_delay_hours": "How long to delay watering after rain is detected",
-          "soil_moisture_threshold": "Skip watering if soil moisture is above this percentage"
+          "rain_delay_hours": "How long to delay watering after rain is detected"
+        }
+      },
+      "zones": {
+        "title": "Zone Names",
+        "description": "Name each of your {zone_count} zones. Existing names are pre-filled.",
+        "data": {
+          "zone_1_name": "Zone 1 Name",
+          "zone_2_name": "Zone 2 Name",
+          "zone_3_name": "Zone 3 Name",
+          "zone_4_name": "Zone 4 Name",
+          "zone_5_name": "Zone 5 Name",
+          "zone_6_name": "Zone 6 Name",
+          "zone_7_name": "Zone 7 Name",
+          "zone_8_name": "Zone 8 Name"
+        }
+      },
+      "zone_switches": {
+        "title": "Zone Switch Mapping",
+        "description": "Assign the switch entity that controls each of your {zone_count} zones. Existing assignments are pre-filled.",
+        "data": {
+          "zone_1_switch": "Zone 1 Switch",
+          "zone_2_switch": "Zone 2 Switch",
+          "zone_3_switch": "Zone 3 Switch",
+          "zone_4_switch": "Zone 4 Switch",
+          "zone_5_switch": "Zone 5 Switch",
+          "zone_6_switch": "Zone 6 Switch",
+          "zone_7_switch": "Zone 7 Switch",
+          "zone_8_switch": "Zone 8 Switch"
         }
       }
     }
