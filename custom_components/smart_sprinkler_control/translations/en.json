@@ -1,0 +1,192 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Sprinkler System",
+        "description": "Configure your sprinkler system. Give it a name and specify how many zones you have.",
+        "data": {
+          "system_name": "System Name",
+          "zone_count": "Number of Zones"
+        },
+        "data_description": {
+          "system_name": "A unique name for this sprinkler system",
+          "zone_count": "How many irrigation zones does your system have?"
+        }
+      },
+      "zones": {
+        "title": "Zone Names",
+        "description": "Give each zone a descriptive name (e.g., \"Front Lawn\", \"Garden Beds\").",
+        "data": {
+          "zone_1_name": "Zone 1 Name",
+          "zone_2_name": "Zone 2 Name",
+          "zone_3_name": "Zone 3 Name",
+          "zone_4_name": "Zone 4 Name",
+          "zone_5_name": "Zone 5 Name",
+          "zone_6_name": "Zone 6 Name",
+          "zone_7_name": "Zone 7 Name",
+          "zone_8_name": "Zone 8 Name"
+        }
+      },
+      "zone_switches": {
+        "title": "Zone Switch Mapping",
+        "description": "Select the switch entity that controls each zone. These are typically ESPHome, Z-Wave, or Zigbee relay switches.",
+        "data": {
+          "zone_1_switch": "Zone 1 Switch",
+          "zone_2_switch": "Zone 2 Switch",
+          "zone_3_switch": "Zone 3 Switch",
+          "zone_4_switch": "Zone 4 Switch",
+          "zone_5_switch": "Zone 5 Switch",
+          "zone_6_switch": "Zone 6 Switch",
+          "zone_7_switch": "Zone 7 Switch",
+          "zone_8_switch": "Zone 8 Switch"
+        },
+        "data_description": {
+          "zone_1_switch": "The switch entity that controls Zone 1",
+          "zone_2_switch": "The switch entity that controls Zone 2",
+          "zone_3_switch": "The switch entity that controls Zone 3",
+          "zone_4_switch": "The switch entity that controls Zone 4",
+          "zone_5_switch": "The switch entity that controls Zone 5",
+          "zone_6_switch": "The switch entity that controls Zone 6",
+          "zone_7_switch": "The switch entity that controls Zone 7",
+          "zone_8_switch": "The switch entity that controls Zone 8"
+        }
+      },
+      "weather": {
+        "title": "Weather Integration (Optional)",
+        "description": "Connect a weather entity and/or rain sensor to enable smart rain delay features.",
+        "data": {
+          "enable_weather_integration": "Enable Weather Integration",
+          "weather_entity": "Weather Entity",
+          "rain_sensor_entity": "Rain Sensor Entity"
+        },
+        "data_description": {
+          "enable_weather_integration": "Use weather data to automatically skip watering when rain is expected",
+          "weather_entity": "A weather integration entity (e.g., weather.home)",
+          "rain_sensor_entity": "A binary sensor that detects rain"
+        }
+      }
+    },
+    "error": {
+      "system_name": "System name is required and must be at least 3 characters",
+      "zone_count": "Zone count must be between 1 and 32",
+      "already_configured": "A system with this name already exists"
+    },
+    "abort": {
+      "already_configured": "This sprinkler system is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sprinkler Options",
+        "description": "Reconfigure your sprinkler system. Set the number of zones and adjust weather/rain-delay preferences. The next steps let you name each zone and assign its switch.",
+        "data": {
+          "zone_count": "Number of Zones",
+          "enable_weather_integration": "Enable Weather Integration",
+          "rain_delay_hours": "Rain Delay Duration (hours)"
+        },
+        "data_description": {
+          "zone_count": "Add or remove zones (1-32). Removing zones drops the highest-numbered ones.",
+          "enable_weather_integration": "Automatically delay watering based on weather forecasts",
+          "rain_delay_hours": "How long to delay watering after rain is detected"
+        }
+      },
+      "zones": {
+        "title": "Zone Names",
+        "description": "Name each of your {zone_count} zones. Existing names are pre-filled.",
+        "data": {
+          "zone_1_name": "Zone 1 Name",
+          "zone_2_name": "Zone 2 Name",
+          "zone_3_name": "Zone 3 Name",
+          "zone_4_name": "Zone 4 Name",
+          "zone_5_name": "Zone 5 Name",
+          "zone_6_name": "Zone 6 Name",
+          "zone_7_name": "Zone 7 Name",
+          "zone_8_name": "Zone 8 Name"
+        }
+      },
+      "zone_switches": {
+        "title": "Zone Switch Mapping",
+        "description": "Assign the switch entity that controls each of your {zone_count} zones. Existing assignments are pre-filled.",
+        "data": {
+          "zone_1_switch": "Zone 1 Switch",
+          "zone_2_switch": "Zone 2 Switch",
+          "zone_3_switch": "Zone 3 Switch",
+          "zone_4_switch": "Zone 4 Switch",
+          "zone_5_switch": "Zone 5 Switch",
+          "zone_6_switch": "Zone 6 Switch",
+          "zone_7_switch": "Zone 7 Switch",
+          "zone_8_switch": "Zone 8 Switch"
+        }
+      }
+    }
+  },
+  "services": {
+    "start_zone": {
+      "name": "Start Zone",
+      "description": "Start watering a specific zone.",
+      "fields": {
+        "entity_id": {
+          "name": "Sprinkler System",
+          "description": "The sprinkler system entity"
+        },
+        "zone_id": {
+          "name": "Zone",
+          "description": "The zone number to start (1-32)"
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Watering duration in minutes (optional, uses zone default if not specified)"
+        }
+      }
+    },
+    "stop_zone": {
+      "name": "Stop Zone",
+      "description": "Stop watering a specific zone.",
+      "fields": {
+        "entity_id": {
+          "name": "Sprinkler System",
+          "description": "The sprinkler system entity"
+        },
+        "zone_id": {
+          "name": "Zone",
+          "description": "The zone number to stop (1-32)"
+        }
+      }
+    },
+    "stop_all_zones": {
+      "name": "Stop All Zones",
+      "description": "Stop all zones immediately.",
+      "fields": {
+        "entity_id": {
+          "name": "Sprinkler System",
+          "description": "The sprinkler system entity"
+        }
+      }
+    },
+    "enable_rain_delay": {
+      "name": "Enable Rain Delay",
+      "description": "Enable rain delay for a specified duration.",
+      "fields": {
+        "entity_id": {
+          "name": "Sprinkler System",
+          "description": "The sprinkler system entity"
+        },
+        "hours": {
+          "name": "Hours",
+          "description": "Number of hours to delay watering (default: 24)"
+        }
+      }
+    },
+    "disable_rain_delay": {
+      "name": "Disable Rain Delay",
+      "description": "Disable rain delay and resume normal operation.",
+      "fields": {
+        "entity_id": {
+          "name": "Sprinkler System",
+          "description": "The sprinkler system entity"
+        }
+      }
+    }
+  }
+}

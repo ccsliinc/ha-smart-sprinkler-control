@@ -1,62 +1,81 @@
 #!/bin/bash
-# Development environment setup script
+# Smart Sprinkler Control — development environment setup.
+#
+# Brings up the dockerized Home Assistant dev instance and builds the panel
+# frontend bundle. Idempotent: safe to re-run. Run from anywhere — it locates
+# the repo root relative to this script.
+#
+# What it does:
+#   1. Verifies Docker is reachable (starts Colima if installed and stopped).
+#   2. `docker compose -f docker-compose.dev.yml up -d`  (container ha-sprinkler-dev)
+#   3. Builds the panel: npm install + npm run build in the frontend dir.
+#   4. Prints the panel URL.
 
-set -e
+set -euo pipefail
 
-echo "🔧 Setting up Home Assistant Device Manager development environment..."
+# Resolve repo root (parent of this script's scripts/ dir).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+FRONTEND_DIR="$REPO_ROOT/custom_components/smart_sprinkler_control/frontend"
+COMPOSE_FILE="$REPO_ROOT/docker-compose.dev.yml"
 
-# Check if Python 3.11+ is available
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
-    echo "❌ Python 3.11 or higher is required"
+cd "$REPO_ROOT"
+
+echo "🔧 Smart Sprinkler Control — dev environment setup"
+echo "   Repo: $REPO_ROOT"
+echo ""
+
+# --- 1. Docker availability -------------------------------------------------
+if ! command -v docker >/dev/null 2>&1; then
+    echo "❌ docker not found on PATH. Install Docker (or Colima on Mac) first."
     exit 1
 fi
 
-# Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "📦 Creating virtual environment..."
-    python3 -m venv venv
-fi
-
-# Activate virtual environment
-echo "🚀 Activating virtual environment..."
-source venv/bin/activate
-
-# Upgrade pip
-echo "⬆️ Upgrading pip..."
-pip install --upgrade pip
-
-# Install development dependencies
-echo "📚 Installing development dependencies..."
-pip install -e ".[dev]"
-
-# Install pre-commit hooks
-echo "🪝 Installing pre-commit hooks..."
-pre-commit install
-
-# Frontend setup
-if [ -d "custom_components/device_manager/frontend" ]; then
-    echo "🎨 Setting up frontend..."
-    cd custom_components/device_manager/frontend
-
-    # Check if Node.js is available
-    if command -v node >/dev/null 2>&1; then
-        echo "📦 Installing Node.js dependencies..."
-        npm install
-        echo "🏗️ Building frontend..."
-        npm run build
+if ! docker info >/dev/null 2>&1; then
+    echo "🐳 Docker daemon not reachable."
+    if command -v colima >/dev/null 2>&1; then
+        echo "   Starting Colima..."
+        colima start
     else
-        echo "⚠️ Node.js not found. Frontend build skipped."
-        echo "   Install Node.js 18+ to build the frontend components."
+        echo "❌ Docker daemon is down and Colima is not installed. Start Docker and re-run."
+        exit 1
     fi
+fi
+echo "✅ Docker is running."
 
-    cd - > /dev/null
+# --- 2. Bring up the dev container ------------------------------------------
+if [ ! -f "$COMPOSE_FILE" ]; then
+    echo "❌ Missing $COMPOSE_FILE"
+    exit 1
+fi
+echo ""
+echo "🚀 Starting Home Assistant dev instance (docker compose up -d)..."
+docker compose -f "$COMPOSE_FILE" up -d
+echo "✅ Container ha-sprinkler-dev is up. First boot can take 1–3 min."
+
+# --- 3. Build the panel frontend --------------------------------------------
+echo ""
+if [ -d "$FRONTEND_DIR" ]; then
+    if command -v npm >/dev/null 2>&1; then
+        echo "🎨 Building panel frontend in custom_components/smart_sprinkler_control/frontend ..."
+        ( cd "$FRONTEND_DIR" && npm install && npm run build )
+        echo "✅ Panel bundle built (dist/smart-sprinkler-control-panel.js)."
+    else
+        echo "⚠️ npm not found. Skipping frontend build."
+        echo "   Install Node.js 18+ then run: (cd $FRONTEND_DIR && npm install && npm run build)"
+    fi
+else
+    echo "⚠️ Frontend dir not found at $FRONTEND_DIR — skipping build."
 fi
 
+# --- 4. Done ----------------------------------------------------------------
 echo ""
-echo "✅ Development environment setup complete!"
+echo "✅ Setup complete."
 echo ""
 echo "🎯 Next steps:"
-echo "  1. Activate the environment: source venv/bin/activate"
-echo "  2. Run tests: pytest"
-echo "  3. Start development: follow README.md instructions"
+echo "   • Home Assistant:  http://localhost:8123"
+echo "   • Sprinkler panel: http://localhost:8123/smart-sprinkler-control"
+echo "   • Logs:            docker compose -f docker-compose.dev.yml logs -f"
+echo "   • Restart (after Python edits): docker compose -f docker-compose.dev.yml restart"
+echo "   • Teardown:        docker compose -f docker-compose.dev.yml down"
 echo ""

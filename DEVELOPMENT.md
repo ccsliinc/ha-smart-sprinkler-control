@@ -188,35 +188,31 @@ docker ps -a | grep ha-sprinkler-dev
 
 ---
 
-## Deploy to Production
+## Installing on Your Home Assistant
 
-Production HA runs on a Pi at `10.0.1.11`. The integration is served from a git clone symlinked into HA's config:
+### Via HACS (recommended)
 
-- Clone location on Pi: `/config/plugin-sources/ha-smart-sprinkler-control`
-- Symlinked to: `/config/custom_components/smart_sprinkler_control`
-- Remote: Gogs `http://10.0.10.70/jsugamele/ha-smart-sprinkler-control.git` (branch: `master`)
+Add this repository as a custom repository in HACS (category: *Integration*), install
+it, then restart Home Assistant and add the integration from **Settings → Devices &
+Services → Add Integration → Smart Sprinkler Control**.
 
-**Deploy flow:**
+### Manual install
+
+Copy `custom_components/smart_sprinkler_control/` into your Home Assistant
+`config/custom_components/` directory and restart Home Assistant. The built panel
+bundle (`frontend/dist/…`) ships in the repo, so no build step is required to run.
+
+### Updating from a git checkout
+
+If you run the integration from a git clone (e.g. cloned into your HA
+`config/custom_components/`), pull the latest and restart:
 
 ```bash
-# 1. Commit and push to Gogs master (from your local machine)
-git push origin master
+git -C <path-to-your-clone> pull
 
-# 2. SSH to the Pi and pull
-ssh 10.0.1.11
-git -C /config/plugin-sources/ha-smart-sprinkler-control pull
-
-# 3. Apply changes:
-#    Python changes → restart HA core (startup-safe):
+# Python changes → restart Home Assistant core:
 ha core restart
 
-#    Panel-only JS changes → pull is sufficient; cache-buster handles the browser.
+# Panel-only JS changes → pull is sufficient; the panel URL cache-buster
+# makes browsers re-fetch automatically.
 ```
-
----
-
-## Known Issues / Cleanup Backlog
-
-| Issue | Status |
-|-------|--------|
-| `scripts/setup_dev.sh` references a non-existent package (`device_manager`) | Stale — do not use |
