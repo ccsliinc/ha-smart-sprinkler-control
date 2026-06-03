@@ -2,6 +2,10 @@
 
 Professional Home Assistant integration for intelligent sprinkler and irrigation system management with Zero Sensor Pollution Architecture.
 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/ccsliinc/ha-smart-sprinkler-control)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange.svg?logo=buy-me-a-coffee)](https://www.buymeacoffee.com/ccsliinc)
+
 ---
 
 ## 🌟 **Features**
@@ -295,6 +299,17 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Issues**: [GitHub Issues](https://github.com/ccsliinc/ha-smart-sprinkler-control/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/ccsliinc/ha-smart-sprinkler-control/discussions)
 - **Documentation**: [Wiki](https://github.com/ccsliinc/ha-smart-sprinkler-control/wiki)
+
+---
+
+## ☕ **Support This Project**
+
+If Smart Sprinkler Control saves you time and makes your smart home better, consider supporting its development:
+
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue.svg?logo=paypal)](https://paypal.me/jsugamele)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange.svg?logo=buy-me-a-coffee)](https://www.buymeacoffee.com/ccsliinc)
+
+*Your support helps maintain and improve Smart Sprinkler Control for the entire community!*
 
 ---
 
