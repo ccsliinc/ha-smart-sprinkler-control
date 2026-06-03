@@ -1,316 +1,146 @@
-# 💧 Smart Sprinkler Control
+# Smart Sprinkler Control
 
-Professional Home Assistant integration for intelligent sprinkler and irrigation system management with Zero Sensor Pollution Architecture.
+A Home Assistant integration for zone-based irrigation. It drives your existing `switch` entities (valve relays, smart outlets, ESPHome boards) as sprinkler zones, adds scheduling and weather-aware rain skipping, and exposes everything through a single sensor instead of flooding your entity registry with dozens of per-zone helpers. Setup is done entirely through the UI config flow, and zones, switches, and weather sources can be reconfigured later without editing YAML.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/ccsliinc/ha-smart-sprinkler-control)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.8%2B-41BDF5.svg)](https://www.home-assistant.io/)
+[![Version](https://img.shields.io/badge/version-2025.1.5-blue.svg)](https://github.com/ccsliinc/ha-smart-sprinkler-control/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange.svg?logo=buy-me-a-coffee)](https://www.buymeacoffee.com/ccsliinc)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue.svg?logo=paypal)](https://paypal.me/jsugamele)
 
----
+## Features
 
-## 🌟 **Features**
+- Up to 32 zones, each mapped to an existing `switch` entity.
+- One summary sensor holds all zone state, schedules, and usage in its attributes. No per-zone sensor spam.
+- Scheduling with per-zone durations, start times, and day-of-week selection.
+- Manual rain delay (set a number of hours) plus optional weather-based skipping from a weather entity or binary rain sensor.
+- Per-zone water-usage and runtime tracking when you set a flow rate.
+- A frontend panel for manual control, scheduling, and per-zone settings.
+- UI config flow; zones, switches, and weather sources are reconfigurable from the Configure dialog.
 
-✅ **Zero Sensor Pollution**: Single comprehensive sensor with rich attributes instead of dozens of individual sensors
-✅ **Smart Weather Integration**: Automatic rain delay and duration adjustment based on weather conditions
-✅ **Advanced Scheduling**: Create complex watering schedules with per-zone duration control
-✅ **Zone Management**: Individual zone control with flow rate tracking and water usage statistics
-✅ **Professional UI**: Modern frontend panel with real-time status and controls
-✅ **Rain Delay System**: Manual and automatic rain delay with configurable duration
-✅ **Water Usage Tracking**: Daily and weekly statistics for each zone and system total
-✅ **HACS Ready**: Easy installation through Home Assistant Community Store
+## Installation
 
----
+### HACS (recommended)
 
-## 📦 **Installation**
+1. In HACS, open the three-dot menu and choose **Custom repositories**.
+2. Add `https://github.com/ccsliinc/ha-smart-sprinkler-control` as an **Integration**.
+3. Search for **Smart Sprinkler Control** and download it.
+4. Restart Home Assistant.
+5. Go to **Settings → Devices & Services → Add Integration** and add **Smart Sprinkler Control**.
 
-### **HACS Installation (Recommended)**
+### Manual
 
-1. Open HACS in Home Assistant
-2. Go to "Integrations"
-3. Click the "+" button
-4. Search for "Smart Sprinkler Control"
-5. Click "Download"
-6. Restart Home Assistant
-7. Go to Settings → Devices & Services → Add Integration
-8. Search for "Smart Sprinkler Control"
+1. Download the latest release.
+2. Copy `custom_components/smart_sprinkler_control/` into your Home Assistant `config/custom_components/` directory.
+3. Restart Home Assistant.
+4. Add the integration from **Settings → Devices & Services**.
 
-### **Manual Installation**
+## Configuration
 
-1. Download the latest release from GitHub
-2. Extract to `custom_components/smart_sprinkler_control/`
-3. Restart Home Assistant
-4. Add integration through Settings → Devices & Services
+Configuration runs through the UI config flow. After adding the integration you'll step through:
 
----
+1. **System** — name the system and choose a zone count (1–32).
+2. **Zones** — name each zone.
+3. **Switches** — map each zone to a `switch` entity. The integration turns these on and off; it does not talk to hardware directly.
+4. **Weather** (optional) — enable weather integration and select a weather entity and/or a binary rain sensor for automatic rain skipping.
 
-## ⚙️ **Configuration**
+To change the setup later, open the integration in **Settings → Devices & Services** and click **Configure**. The options flow lets you adjust the zone count, rename zones, and remap zone switch entities. Per-zone settings such as default duration and flow rate are edited from the gear icon on each zone in the frontend panel.
 
-### **Initial Setup**
+## Services
 
-1. **Add Integration**: Settings → Devices & Services → Add Integration → Smart Sprinkler Control
-2. **System Name**: Enter a name for your sprinkler system (e.g., "Front Yard Sprinklers")
-3. **Zone Count**: Configure the number of sprinkler zones (1-32 zones supported)
-4. **Zone Names**: Customize names for each zone (e.g., "Front Lawn", "Back Garden", "Flower Beds")
+All services target the summary sensor via `entity_id`.
 
-### **Optional Weather Integration**
+| Service | Description |
+| --- | --- |
+| `smart_sprinkler_control.start_zone` | Start watering a zone for a given duration (minutes). |
+| `smart_sprinkler_control.stop_zone` | Stop a running zone. |
+| `smart_sprinkler_control.stop_all_zones` | Stop every active zone. |
+| `smart_sprinkler_control.adjust_zone_time` | Change the remaining time on a running zone. |
+| `smart_sprinkler_control.enable_rain_delay` | Skip watering for a number of hours. |
+| `smart_sprinkler_control.disable_rain_delay` | Clear an active rain delay. |
+| `smart_sprinkler_control.update_zone_settings` | Update a zone's name, default duration, or enabled state. |
+| `smart_sprinkler_control.create_schedule` | Create a watering schedule (zones, start time, days). |
+| `smart_sprinkler_control.delete_schedule` | Delete a schedule by ID. |
+| `smart_sprinkler_control.run_schedule` | Run a schedule immediately. |
 
-- **Weather Entity**: Select your weather integration entity for automatic rain detection
-- **Rain Sensor**: Configure a binary rain sensor entity for immediate rain detection
-- **Rain Threshold**: Set precipitation threshold for automatic rain delay (default: 0.1 inches)
+Example, starting zone 1 for 15 minutes:
 
----
-
-## 🎮 **Usage**
-
-### **Services Available**
-
-#### **Zone Control Services**
 ```yaml
-# Start a specific zone
 service: smart_sprinkler_control.start_zone
 data:
-  entity_id: sensor.sprinkler_system
+  entity_id: sensor.smart_sprinkler_system
   zone_id: 1
-  duration: 15  # minutes
-
-# Stop a specific zone
-service: smart_sprinkler_control.stop_zone
-data:
-  entity_id: sensor.sprinkler_system
-  zone_id: 1
-
-# Stop all zones
-service: smart_sprinkler_control.stop_all_zones
-data:
-  entity_id: sensor.sprinkler_system
+  duration: 15
 ```
 
-#### **System Control Services**
-```yaml
-# Enable rain delay
-service: smart_sprinkler_control.enable_rain_delay
-data:
-  entity_id: sensor.sprinkler_system
-  hours: 24
+Creating a schedule:
 
-# Disable rain delay
-service: smart_sprinkler_control.disable_rain_delay
-data:
-  entity_id: sensor.sprinkler_system
-```
-
-#### **Schedule Management Services**
 ```yaml
-# Create a watering schedule
 service: smart_sprinkler_control.create_schedule
 data:
-  entity_id: sensor.sprinkler_system
-  schedule_id: "morning_schedule"
-  name: "Morning Watering"
+  entity_id: sensor.smart_sprinkler_system
+  schedule_id: morning
+  name: Morning Watering
   zone_ids: [1, 2, 3]
   start_time: "06:00"
-  days_of_week: [0, 2, 4, 6]  # Mon, Wed, Fri, Sun
-  zone_durations:
-    1: 15
-    2: 20
-    3: 10
+  days_of_week: [1, 3, 5]  # Mon, Wed, Fri (0 = Sunday)
 ```
 
-### **Entity Data Structure**
+## Automation Examples
 
-The integration creates a single sensor entity with comprehensive attributes:
+Skip the morning run when rain delay is active:
 
-```yaml
-sensor.sprinkler_system:
-  state: "idle"  # idle, watering_N_zones, scheduled, rain_delayed, disabled
-  attributes:
-    system_name: "Front Yard Sprinklers"
-    total_zones: 8
-    active_zones: 0
-    scheduled_zones: 2
-    enabled_zones: 8
-    rain_delay_active: false
-    total_water_today: 45.2  # gallons
-    total_runtime_today: 120  # minutes
-    zone_details:
-      zone_1:
-        name: "Front Lawn"
-        state: "idle"
-        enabled: true
-        remaining_duration: 0
-        can_start: true
-        is_watering: false
-        total_runtime_today: 30
-        total_water_today: 12.5
-        settings:
-          duration: 15
-          flow_rate: 2.5
-          area_sqft: 500
-```
-
----
-
-## 🎨 **Frontend Panel**
-
-Access the professional control panel at `/smart-sprinkler-control` with features:
-
-- **Real-time Zone Status**: Live status cards for each zone
-- **Manual Controls**: Start/stop buttons with duration sliders
-- **Schedule Management**: Create and manage watering schedules
-- **System Statistics**: Water usage and runtime statistics
-- **Weather Integration**: Current conditions and rain delay status
-- **Zone Configuration**: Edit zone names, durations, and flow rates
-
----
-
-## 🤖 **Automation Examples**
-
-### **Smart Rain Delay**
 ```yaml
 automation:
-  - alias: "Auto Rain Delay"
-    trigger:
-      - platform: numeric_state
-        entity_id: sensor.precipitation_today
-        above: 0.1
-    action:
-      - service: smart_sprinkler_control.enable_rain_delay
-        data:
-          entity_id: sensor.sprinkler_system
-          hours: 48
-```
-
-### **Morning Watering Routine**
-```yaml
-automation:
-  - alias: "Morning Sprinklers"
+  - alias: Morning sprinklers
     trigger:
       - platform: time
         at: "06:00:00"
     condition:
       - condition: state
-        entity_id: sensor.sprinkler_system
+        entity_id: sensor.smart_sprinkler_system
         attribute: rain_delay_active
         state: false
     action:
       - service: smart_sprinkler_control.start_zone
         data:
-          entity_id: sensor.sprinkler_system
-          zone_id: "{{ item }}"
+          entity_id: sensor.smart_sprinkler_system
+          zone_id: 1
           duration: 15
-        loop:
-          - 1
-          - 2
-          - 3
 ```
 
-### **Water Usage Notification**
+Notify when daily water use crosses a threshold:
+
 ```yaml
 automation:
-  - alias: "High Water Usage Alert"
+  - alias: High water usage alert
     trigger:
       - platform: numeric_state
-        entity_id: sensor.sprinkler_system
+        entity_id: sensor.smart_sprinkler_system
         attribute: total_water_today
         above: 100
     action:
       - service: notify.mobile_app
         data:
-          message: "Sprinkler system used {{ states.sensor.sprinkler_system.attributes.total_water_today }} gallons today"
+          message: >
+            Sprinklers used
+            {{ state_attr('sensor.smart_sprinkler_system', 'total_water_today') }}
+            gallons today.
 ```
 
----
+## Support
 
-## 🛠️ **Development**
+- Bugs and feature requests: [GitHub Issues](https://github.com/ccsliinc/ha-smart-sprinkler-control/issues)
+- Questions and ideas: [GitHub Discussions](https://github.com/ccsliinc/ha-smart-sprinkler-control/discussions)
 
-### **Setup Development Environment**
-```bash
-# Clone repository
-git clone https://github.com/ccsliinc/ha-smart-sprinkler-control.git
-cd ha-smart-sprinkler-control
+## Support This Project
 
-# Setup development environment
-./scripts/setup_dev.sh
+If this integration is useful to you, contributions toward its upkeep are appreciated:
 
-# Run tests
-pytest
+- [Buy Me A Coffee](https://www.buymeacoffee.com/ccsliinc)
+- [PayPal](https://paypal.me/jsugamele)
 
-# Code quality checks
-pre-commit run --all-files
-```
+## License
 
-### **Project Structure**
-```
-custom_components/smart_sprinkler_control/
-├── __init__.py              # Integration entry point
-├── config_flow.py          # Configuration UI
-├── sensor.py               # Summary sensor (THE HEART)
-├── const.py                # Constants and service definitions
-├── manifest.json           # HACS metadata
-│
-├── models/                 # Data Models
-│   └── zone.py             # Zone and system dataclasses
-│
-├── services/               # Business Logic (THE BRAIN)
-│   ├── zone_services.py    # Zone control operations
-│   ├── system_services.py  # System-wide operations
-│   ├── schedule_services.py # Schedule management
-│   └── weather_services.py # Weather integration
-│
-├── storage/                # Data Persistence
-│   └── storage.py          # State save/load
-│
-├── api/                    # HTTP API
-│   └── http.py             # Frontend endpoints
-│
-├── frontend/               # Professional UI
-│   ├── src/
-│   │   ├── components/     # UI components
-│   │   ├── modules/        # Core functionality
-│   │   ├── templates/      # HTML layouts
-│   │   └── utils/          # Shared utilities
-│   ├── dist/               # Compiled assets
-│   └── package.json        # Node.js dependencies
-│
-└── translations/           # Internationalization
-    └── en.json             # English translations
-```
-
----
-
-## 🤝 **Contributing**
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
----
-
-## 📄 **License**
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🆘 **Support**
-
-- **Issues**: [GitHub Issues](https://github.com/ccsliinc/ha-smart-sprinkler-control/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ccsliinc/ha-smart-sprinkler-control/discussions)
-- **Documentation**: [Wiki](https://github.com/ccsliinc/ha-smart-sprinkler-control/wiki)
-
----
-
-## ☕ **Support This Project**
-
-If Smart Sprinkler Control saves you time and makes your smart home better, consider supporting its development:
-
-[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue.svg?logo=paypal)](https://paypal.me/jsugamele)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange.svg?logo=buy-me-a-coffee)](https://www.buymeacoffee.com/ccsliinc)
-
-*Your support helps maintain and improve Smart Sprinkler Control for the entire community!*
-
----
-
-**🌿 Transform your irrigation system into an intelligent, efficient, and automated watering solution with Smart Sprinkler Control!**
+Released under the MIT License. See [LICENSE](LICENSE) for details.

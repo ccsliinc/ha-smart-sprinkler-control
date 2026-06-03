@@ -12,10 +12,6 @@ venv/
 .idea/
 *.iml
 
-# Claude settings
-.claude/
-CLAUDE.md
-
 # Home Assistant Development Environment
 config/
 *.db

@@ -9,7 +9,7 @@ description = "Professional Home Assistant sprinkler control integration with Ze
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Device Manager Contributors"}
+    {name = "Joseph Sugamele", email = "jsugamele@gmail.com"}
 ]
 keywords = ["homeassistant", "sprinkler", "irrigation", "watering", "automation", "integration"]
 classifiers = [
