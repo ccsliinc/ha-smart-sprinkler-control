@@ -87,7 +87,7 @@ class SmartSprinklerManagerConfigFlow(
                 self._abort_if_unique_id_configured()
 
                 self._system_name = system_name
-                self._zone_count = zone_count
+                self._zone_count = int(zone_count)
 
                 # Proceed to zone configuration
                 return await self.async_step_zones()
