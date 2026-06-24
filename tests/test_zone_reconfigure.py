@@ -43,6 +43,7 @@ _spec.loader.exec_module(zone_mod)
 
 SprinklerSystem = zone_mod.SprinklerSystem
 SprinklerSchedule = zone_mod.SprinklerSchedule
+resolve_zone_name = zone_mod.resolve_zone_name
 
 
 def _make_system(zone_count: int = 6) -> "zone_mod.SprinklerSystem":
@@ -166,3 +167,63 @@ def test_reconcile_preserves_surviving_zone_state():
     system.reconcile_zones(zone_count=8, zone_names={}, zone_switches={})
     assert system.zones[2].total_runtime_today == 42
     assert set(system.zones) == {1, 2, 3, 4, 5, 6, 7, 8}
+
+
+# ---------------------------------------------------------------------------
+# Regression: issue #2 — renaming an EXISTING zone via the OptionsFlow did not
+# propagate to the control panel / schedule, while ADDING a new named zone did.
+#
+# Root cause: async_setup_entry applied the new name from entry.data
+# (CONF_ZONE_NAMES) and then the storage-restore block overwrote it with the
+# stale stored name (`zone.settings.name = settings.get("name", ...)`). On
+# reload the OLD name had just been re-saved to storage by async_unload_entry,
+# so the rename was silently clobbered. New zones have no storage row, so they
+# were never overwritten -> they "worked". resolve_zone_name encodes the fix:
+# config (entry.data) is authoritative, storage only fills gaps.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_zone_name_config_wins_over_stale_storage():
+    """Existing-zone rename: config name beats the stale stored (old) name."""
+    # entry.data was rewritten by the OptionsFlow with the NEW name; the live
+    # zone already had it applied; storage still holds the OLD name.
+    result = resolve_zone_name(
+        zone_id=1,
+        config_applied_name="Front Lawn",  # new name, applied from config
+        stored_name="Zone 1",  # stale name persisted before reload
+        config_zone_names={"1": "Front Lawn"},
+    )
+    assert result == "Front Lawn"
+
+
+def test_resolve_zone_name_config_wins_with_int_keys():
+    """Config precedence holds when CONF_ZONE_NAMES uses int keys (legacy)."""
+    result = resolve_zone_name(
+        zone_id=3,
+        config_applied_name="Garden",
+        stored_name="Old Garden",
+        config_zone_names={3: "Garden"},
+    )
+    assert result == "Garden"
+
+
+def test_resolve_zone_name_storage_fills_when_config_silent():
+    """No config name for this zone -> storage value is restored (gap fill)."""
+    result = resolve_zone_name(
+        zone_id=2,
+        config_applied_name="Zone 2",  # untouched default
+        stored_name="Side Bed",  # user-set name only in storage
+        config_zone_names={},
+    )
+    assert result == "Side Bed"
+
+
+def test_resolve_zone_name_keeps_config_when_no_storage():
+    """New zone (no storage row passes empty stored_name) keeps config name."""
+    result = resolve_zone_name(
+        zone_id=7,
+        config_applied_name="New Patio",
+        stored_name=None,
+        config_zone_names={"7": "New Patio"},
+    )
+    assert result == "New Patio"

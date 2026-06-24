@@ -660,3 +660,37 @@ class SprinklerSystem:
             return "scheduled"
 
         return "idle"
+
+
+def resolve_zone_name(
+    zone_id: int,
+    config_applied_name: str,
+    stored_name: Optional[str],
+    config_zone_names: Dict[Any, str],
+) -> str:
+    """Decide a zone's name when restoring from storage, config taking priority.
+
+    Description:
+        On reload, the config (entry.data CONF_ZONE_NAMES) is authoritative.
+        Storage may hold a stale name (e.g. the OLD name re-saved on unload
+        right before a rename takes effect), so it must only fill in a name
+        when the config did not supply one for this zone. This mirrors the
+        switch_entity precedence rule in async_setup_entry.
+    Inputs:
+        zone_id: integer zone id being restored.
+        config_applied_name: name already set on the live zone from config.
+        stored_name: name found in persistent storage (may be None/empty).
+        config_zone_names: the CONF_ZONE_NAMES mapping from entry.data; keys
+            may be str or int.
+    Outputs:
+        The name the zone should use (str).
+    Example:
+        >>> resolve_zone_name(1, "Front Lawn", "Zone 1", {"1": "Front Lawn"})
+        'Front Lawn'
+        >>> resolve_zone_name(2, "Zone 2", "Side Bed", {})
+        'Side Bed'
+    """
+    config_named = str(zone_id) in config_zone_names or zone_id in config_zone_names
+    if stored_name and not config_named:
+        return stored_name
+    return config_applied_name

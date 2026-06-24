@@ -38,7 +38,7 @@ from .const import (
     VERSION,
 )
 from .frontend.panel import async_register_panel, async_unregister_panel
-from .models.zone import SprinklerSchedule, SprinklerSystem
+from .models.zone import SprinklerSchedule, SprinklerSystem, resolve_zone_name
 from .services.weather_services import WeatherServices
 
 _LOGGER = logging.getLogger(__name__)
@@ -304,7 +304,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     zone = system.zones[zone_id]
                     if zone_data.get("settings"):
                         settings = zone_data["settings"]
-                        zone.settings.name = settings.get("name", zone.settings.name)
+                        # Config (entry.data CONF_ZONE_NAMES) is authoritative
+                        # for the name; storage only fills in when config gave
+                        # none. Without this, an OptionsFlow rename is silently
+                        # clobbered on reload: async_unload_entry re-saves the
+                        # still-old in-memory name to storage, which would then
+                        # overwrite the freshly-applied new name from entry.data.
+                        zone.settings.name = resolve_zone_name(
+                            zone_id,
+                            zone.settings.name,
+                            settings.get("name"),
+                            zone_names,
+                        )
                         zone.settings.duration = settings.get("duration", 15)
                         zone.settings.enabled = settings.get("enabled", True)
                         zone.settings.flow_rate = settings.get("flow_rate")
