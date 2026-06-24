@@ -292,6 +292,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     system.weather_entity_id = weather_entity
     system.rain_sensor_entity_id = rain_sensor_entity
 
+    # If the weather integration is fully disabled (no weather entity and no
+    # rain sensor configured), an auto rain delay previously set by the weather
+    # check has nothing left to re-evaluate or clear it — it would block every
+    # zone forever. Clear it here on setup/reload. Uses auto=True so a delay the
+    # user set manually is left untouched (disable_rain_delay no-ops in that case).
+    if not weather_entity and not rain_sensor_entity:
+        if system.disable_rain_delay(auto=True):
+            _LOGGER.info(
+                "Weather integration disabled; cleared stale auto rain delay for %s",
+                system_name,
+            )
+
     # Restore data from storage
     if stored_data:
         _LOGGER.info("Restoring saved data for %s", system_name)

@@ -434,6 +434,11 @@ class SprinklerSystem:
             _LOGGER.error("Zone %d does not exist", zone_id)
             return False
 
+        # A lapsed delay must never block a start: clear it first if its end
+        # time has passed (e.g. weather integration was turned off and nothing
+        # else re-evaluated the timer).
+        self._maybe_expire_rain_delay()
+
         if self.rain_delay_active:
             _LOGGER.warning("Cannot start zone %d: rain delay is active", zone_id)
             return False
@@ -572,14 +577,25 @@ class SprinklerSystem:
         _LOGGER.info("Rain delay disabled (%s)", "auto" if auto else "manual")
         return True
 
-    def update_system_state(self) -> None:
-        """Update system state and zone timers."""
-        # Check if rain delay should expire (timer-based expiry clears both
-        # auto and manual delays; force-clear via auto=False bypasses the
-        # manual-protection guard since the timer the user/auto set is up).
+    def _maybe_expire_rain_delay(self) -> None:
+        """Clear the rain delay if its end time has passed.
+
+        Description:
+            Timer-based expiry — clears both auto and manual delays. Force-clear
+            via auto=False bypasses the manual-protection guard since the timer
+            the user/auto set is up. Safe to call any time (no-op if not active
+            or not yet expired).
+        Inputs: none (reads self.rain_delay_active / rain_delay_end_time).
+        Outputs: None.
+        """
         if self.rain_delay_active and self.rain_delay_end_time:
             if datetime.now() >= self.rain_delay_end_time:
                 self.disable_rain_delay()
+
+    def update_system_state(self) -> None:
+        """Update system state and zone timers."""
+        # Check if rain delay should expire before doing anything else.
+        self._maybe_expire_rain_delay()
 
         # Update all zones
         for zone in self.zones.values():

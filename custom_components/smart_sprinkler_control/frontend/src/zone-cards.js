@@ -263,7 +263,7 @@ export const zoneCardMethods = {
         <div>
           ${
             weather.rainDelayActive
-              ? `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.disableRainDelay()">Cancel Rain Delay</button>`
+              ? `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.disableRainDelay()">Clear Rain Delay</button>`
               : `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.enableRainDelay()">Enable Rain Delay</button>`
           }
         </div>

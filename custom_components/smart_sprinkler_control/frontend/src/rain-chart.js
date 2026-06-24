@@ -26,23 +26,10 @@ export const rainChartMethods = {
 
   _renderRainGraph() {
     // When the backend reports zero precipitation sensors (genuine no-sensor
-    // case, NOT a transient fetch error), replace the chart with a small muted
-    // note instead of a permanently flat zero graph that looks broken.
+    // case, NOT a transient fetch error), hide the precipitation widget
+    // entirely so nothing renders instead of showing an empty/flat graph.
     if (this._noPrecipSensor) {
-      return `
-    <div class="rain-graph-container" style="
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(0, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-      box-sizing: border-box;
-    ">
-      <div style="color: #888; font-size: 12px; text-align: center;">
-        No precipitation sensor configured.
-      </div>
-    </div>
-  `;
+      return '';
     }
 
     // Default to in until the API tells us otherwise; _rainUnit is set on

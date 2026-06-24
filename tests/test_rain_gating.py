@@ -20,7 +20,7 @@ import asyncio
 import importlib.util
 import sys
 import types
-from datetime import time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -263,6 +263,43 @@ def test_auto_delay_does_not_clear_manual(weather_env):
     assert result == "noop"
     assert sys_.rain_delay_active is True
     assert sys_.auto_rain_delay is False
+
+
+# ===========================================================================
+# Lapsed rain-delay expiry (model layer)
+# ===========================================================================
+def test_expired_delay_does_not_block_start():
+    """A rain delay whose end time has passed must not block start_zone."""
+    sys_ = _make_system()
+    sys_.enable_rain_delay(24, auto=True)
+    assert sys_.rain_delay_active is True
+    # Force the timer into the past so the delay is lapsed.
+    sys_.rain_delay_end_time = datetime.now() - timedelta(seconds=1)
+    started = sys_.start_zone(1, 10)
+    assert started is True
+    assert sys_.rain_delay_active is False
+
+
+def test_auto_delay_cleared_when_weather_disabled():
+    """Model behavior the weather-disabled setup path relies on.
+
+    An auto delay clears under an auto disable, but a manually set delay
+    survives an auto disable (it is not silently auto-cleared).
+    """
+    # Auto delay clears under auto disable.
+    sys_ = _make_system()
+    sys_.enable_rain_delay(24, auto=True)
+    assert sys_.rain_delay_active is True
+    cleared = sys_.disable_rain_delay(auto=True)
+    assert cleared is True
+    assert sys_.rain_delay_active is False
+
+    # Manual delay survives an auto disable.
+    sys2 = _make_system()
+    sys2.enable_rain_delay(24, auto=False)
+    cleared2 = sys2.disable_rain_delay(auto=True)
+    assert cleared2 is False
+    assert sys2.rain_delay_active is True
 
 
 if __name__ == "__main__":

@@ -1432,20 +1432,7 @@
     },
     _renderRainGraph() {
       if (this._noPrecipSensor) {
-        return `
-    <div class="rain-graph-container" style="
-      background: rgba(0, 0, 0, 0.3);
-      border: 1px solid rgba(0, 255, 255, 0.2);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-      box-sizing: border-box;
-    ">
-      <div style="color: #888; font-size: 12px; text-align: center;">
-        No precipitation sensor configured.
-      </div>
-    </div>
-  `;
+        return "";
       }
       const unit = this._rainUnit || "in";
       return `
@@ -1924,7 +1911,7 @@
           ${weather.rainDelayActive ? `<p class="rain-delay-active">Rain delay active until ${weather.rainDelayUntil || "unknown"}</p>` : ""}
         </div>
         <div>
-          ${weather.rainDelayActive ? `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.disableRainDelay()">Cancel Rain Delay</button>` : `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.enableRainDelay()">Enable Rain Delay</button>`}
+          ${weather.rainDelayActive ? `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.disableRainDelay()">Clear Rain Delay</button>` : `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.enableRainDelay()">Enable Rain Delay</button>`}
         </div>
       </div>
     </div>
