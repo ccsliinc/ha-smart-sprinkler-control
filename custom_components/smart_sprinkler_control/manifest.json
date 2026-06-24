@@ -1,14 +1,24 @@
 {
   "domain": "smart_sprinkler_control",
   "name": "Smart Sprinkler Control",
-  "after_dependencies": ["input_boolean", "input_datetime", "input_number", "input_select", "recorder"],
-  "codeowners": ["@ccsliinc"],
+  "after_dependencies": [
+    "input_boolean",
+    "input_datetime",
+    "input_number",
+    "input_select",
+    "recorder"
+  ],
+  "codeowners": [
+    "@ccsliinc"
+  ],
   "config_flow": true,
-  "dependencies": ["http"],
+  "dependencies": [
+    "http"
+  ],
   "documentation": "https://github.com/ccsliinc/ha-smart-sprinkler-control/blob/master/README.md",
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/ccsliinc/ha-smart-sprinkler-control/issues",
   "requirements": [],
-  "version": "2025.1.5"
+  "version": "2025.1.6"
 }
