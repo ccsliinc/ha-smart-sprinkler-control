@@ -302,5 +302,39 @@ def test_auto_delay_cleared_when_weather_disabled():
     assert sys2.rain_delay_active is True
 
 
+# ===========================================================================
+# Rain-delay start gate: manual override + weather-configured guard
+# ===========================================================================
+def test_manual_start_not_blocked_by_rain_delay():
+    """A manual start (schedule_id=None) is never blocked by a rain delay."""
+    sys_ = _make_system()
+    sys_.weather_entity_id = "weather.home"  # weather configured
+    sys_.enable_rain_delay(24, auto=True)
+    assert sys_.rain_delay_active is True
+    started = sys_.start_zone(1, 10)  # schedule_id defaults to None -> manual
+    assert started is True
+
+
+def test_scheduled_start_blocked_when_weather_configured():
+    """A scheduled start is still blocked by an active rain delay."""
+    sys_ = _make_system()
+    sys_.weather_entity_id = "weather.home"  # weather configured
+    sys_.enable_rain_delay(24, auto=True)
+    assert sys_.rain_delay_active is True
+    started = sys_.start_zone(1, 10, schedule_id="morning")
+    assert started is False
+
+
+def test_scheduled_start_not_blocked_without_weather():
+    """No weather/rain source configured -> rain-delay gate is skipped."""
+    sys_ = _make_system()
+    sys_.weather_entity_id = None
+    sys_.rain_sensor_entity_id = None
+    sys_.enable_rain_delay(24, auto=True)
+    assert sys_.rain_delay_active is True
+    started = sys_.start_zone(1, 10, schedule_id="morning")
+    assert started is True
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

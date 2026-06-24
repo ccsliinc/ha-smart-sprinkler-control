@@ -439,8 +439,14 @@ class SprinklerSystem:
         # else re-evaluated the timer).
         self._maybe_expire_rain_delay()
 
-        if self.rain_delay_active:
-            _LOGGER.warning("Cannot start zone %d: rain delay is active", zone_id)
+        weather_configured = bool(self.weather_entity_id or self.rain_sensor_entity_id)
+        is_manual = schedule_id is None
+        # Rain delay is weather-driven: it never blocks an explicit manual start, and
+        # it's moot when no weather/rain source is configured.
+        if self.rain_delay_active and not is_manual and weather_configured:
+            _LOGGER.warning(
+                "Cannot start scheduled zone %d: rain delay is active", zone_id
+            )
             return False
 
         if not self.is_enabled:
