@@ -11,6 +11,7 @@ from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -533,6 +534,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Turn off the physical switch if configured
         if zone.settings.switch_entity:
             try:
+                # No context= here on purpose: there is no calling user. This
+                # is the integration's own startup safety action, so it runs
+                # with the integration's authority by design.
                 await hass.services.async_call(
                     "switch",
                     "turn_off",
@@ -882,6 +886,13 @@ async def _register_services(hass: HomeAssistant) -> None:
                         "turn_off",
                         {"entity_id": active_zone.settings.switch_entity},
                         blocking=True,
+                        # Carry the CALLER's context so Home Assistant applies
+                        # its own per-entity control policy to the user who
+                        # asked. Relaying with a fresh context made this
+                        # integration a confused deputy: the switch was turned
+                        # on with the integration's authority, and the caller's
+                        # entity permissions were never evaluated.
+                        context=call.context,
                     )
                     _LOGGER.debug(
                         "Single-zone operation: turned off zone %d (%s)",
@@ -918,6 +929,7 @@ async def _register_services(hass: HomeAssistant) -> None:
                         "turn_on",
                         {"entity_id": zone.settings.switch_entity},
                         blocking=True,
+                        context=call.context,
                     )
                     _LOGGER.debug(
                         "Zone %d started: turned on %s",
@@ -965,6 +977,7 @@ async def _register_services(hass: HomeAssistant) -> None:
                     "turn_off",
                     {"entity_id": zone.settings.switch_entity},
                     blocking=True,
+                    context=call.context,
                 )
                 _LOGGER.debug("    Switch OFF confirmed")
             except Exception as e:
@@ -1036,6 +1049,7 @@ async def _register_services(hass: HomeAssistant) -> None:
                         "turn_off",
                         {"entity_id": zone.settings.switch_entity},
                         blocking=True,
+                        context=call.context,
                     )
                     _LOGGER.debug(
                         "Turned off switch %s for zone %d",
@@ -1299,6 +1313,7 @@ async def _register_services(hass: HomeAssistant) -> None:
                     "turn_on",
                     {"entity_id": zone.settings.switch_entity},
                     blocking=True,
+                    context=call.context,
                 )
             except Exception as e:
                 _LOGGER.error(
@@ -1308,7 +1323,19 @@ async def _register_services(hass: HomeAssistant) -> None:
         # Trigger state update
         await _trigger_state_update(hass, entity_id)
 
-    # Register all services
+    # Register all services.
+    #
+    # SECURITY, and this split is deliberate: the SEVEN operational services
+    # below stay callable by non-admin users, because this is a household
+    # irrigation system and family members who are non-admin Home Assistant
+    # users must still be able to run their sprinklers. Non-admin operation is
+    # governed instead by passing the caller's context through to the
+    # underlying switch (see the relays in the handlers above), so HA evaluates
+    # that user's own entity permissions on the valve.
+    #
+    # The THREE configuration mutators that follow them - update_zone_settings,
+    # create_schedule, delete_schedule - change stored configuration rather
+    # than operate the system, so those are admin-only.
     hass.services.async_register(
         DOMAIN, SERVICE_START_ZONE, handle_start_zone, schema=START_ZONE_SCHEMA
     )
@@ -1339,19 +1366,25 @@ async def _register_services(hass: HomeAssistant) -> None:
         handle_disable_rain_delay,
         schema=DISABLE_RAIN_DELAY_SCHEMA,
     )
-    hass.services.async_register(
+    # Admin-only: these three write stored configuration (zone names and
+    # settings, schedule definitions). async_register_admin_service rejects a
+    # non-admin caller with Unauthorized before the handler runs.
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_UPDATE_ZONE_SETTINGS,
         handle_update_zone_settings,
         schema=UPDATE_ZONE_SETTINGS_SCHEMA,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_CREATE_SCHEDULE,
         handle_create_schedule,
         schema=CREATE_SCHEDULE_SCHEMA,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_DELETE_SCHEDULE,
         handle_delete_schedule,
@@ -1438,6 +1471,11 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                     )
                     _LOGGER.debug("    Turning off switch: %s", switch_entity)
                     try:
+                        # No context= here on purpose: a zone timer expiring is
+                        # a coordinator action with no calling user. The
+                        # original requester is long gone by the time this
+                        # fires, so there is no caller whose permissions could
+                        # meaningfully be evaluated.
                         await self.hass.services.async_call(
                             "switch",
                             "turn_off",
@@ -1569,6 +1607,8 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
                                             switch_entity,
                                         )
                                         try:
+                                            # No context=: scheduled run, no
+                                            # calling user (see above).
                                             await self.hass.services.async_call(
                                                 "switch",
                                                 "turn_on",
@@ -1663,6 +1703,8 @@ class SprinklerDataUpdateCoordinator(DataUpdateCoordinator):
         if zone.settings.switch_entity:
             _LOGGER.debug("    Turning on switch: %s", zone.settings.switch_entity)
             try:
+                # No context=: advancing a schedule queue is a coordinator
+                # action with no calling user (see above).
                 await self.hass.services.async_call(
                     "switch",
                     "turn_on",

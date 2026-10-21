@@ -3,7 +3,7 @@
 import logging
 
 DOMAIN = "smart_sprinkler_control"
-VERSION = "2025.1.5"
+VERSION = "2025.1.10"
 ISSUE_URL = "https://github.com/ccsliinc/ha-smart-sprinkler-control"
 PLATFORMS = ["sensor"]
 

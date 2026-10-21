@@ -22,7 +22,7 @@
     DELETE_SCHEDULE: "delete_schedule",
     RUN_SCHEDULE: "run_schedule"
   };
-  var VERSION = "2025.1.0";
+  var VERSION = "2025.1.10";
 
   // src/service-client.js
   var ServiceClient = class {
@@ -1411,6 +1411,24 @@
     }
   };
 
+  // src/html.js
+  var HTML_ENTITIES = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  };
+  function escapeHtml(value) {
+    if (value === null || value === void 0) {
+      return "";
+    }
+    return String(value).replace(/[&<>"']/g, (ch) => HTML_ENTITIES[ch]);
+  }
+  function jsArg(value) {
+    return escapeHtml(JSON.stringify(value === void 0 ? null : value));
+  }
+
   // src/rain-chart.js
   var rainChartMethods = {
     _startRainRefresh() {
@@ -1450,8 +1468,8 @@
           Precipitation (24h)
         </h3>
         <div style="display: flex; align-items: center; gap: 12px;">
-          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 ${unit}</span>
-          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 ${unit}</span>
+          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 ${escapeHtml(unit)}</span>
+          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 ${escapeHtml(unit)}</span>
         </div>
       </div>
       <div style="height: 120px; position: relative;">
@@ -1470,12 +1488,10 @@
         return this._getEmptyRainData("no hass");
       }
       try {
-        const response = await fetch("/api/smart_sprinkler_control/precipitation");
-        if (!response.ok) {
-          console.warn("[SSC] Precipitation API error:", response.status);
-          return this._getEmptyRainData("api error");
-        }
-        const data = await response.json();
+        const data = await this._hass.callApi(
+          "GET",
+          "smart_sprinkler_control/precipitation"
+        );
         if (this._isDebugEnabled?.()) {
           console.log("[SSC] Precipitation data from API:", data);
         }
@@ -1728,7 +1744,7 @@
       const isAnyZoneActive = this.dataManager.getZones().some((z) => z.state === "watering" && z.is_running);
       return `
     <div class="panel-header">
-      <h1>${systemName}</h1>
+      <h1>${escapeHtml(systemName)}</h1>
       <div class="header-actions">
         ${isAnyZoneActive ? `<button class="btn btn-danger" onclick="SmartSprinklerControlPanel.stopAllZones()">
                 Stop All
@@ -1777,14 +1793,14 @@
           <div class="zone-header-left">
             <ha-icon class="zone-icon ${iconClass}" icon="${zoneIconName}"></ha-icon>
             <div class="zone-title-block">
-              <span class="zone-name">${zone.name || `Zone ${zone.id}`}</span>
+              <span class="zone-name">${escapeHtml(zone.name || `Zone ${zone.id}`)}</span>
               <span class="zone-number">Zone ${zone.id}</span>
             </div>
           </div>
           <button class="zone-settings-btn" onclick="SmartSprinklerControlPanel.showZoneSettings(${zone.id})" title="Zone Settings">\u2699\uFE0F</button>
         </div>
         <div class="zone-status-row">
-          <span class="zone-status ${statusClass}">${statusText}</span>
+          <span class="zone-status ${statusClass}">${escapeHtml(statusText)}</span>
         </div>
         ${cardContent}
         <div class="zone-controls">
@@ -1842,7 +1858,7 @@
     <div class="zone-stat-row">
       <ha-icon icon="${stat.icon}"></ha-icon>
       <span class="zone-stat-label">${stat.label}</span>
-      <span class="zone-stat-value">${stat.value}</span>
+      <span class="zone-stat-value">${escapeHtml(stat.value)}</span>
     </div>
   `).join("");
       return `
@@ -1907,8 +1923,8 @@
     <div class="weather-card">
       <div class="weather-info">
         <div>
-          <p>Weather Entity: ${weather.weatherEntity}</p>
-          ${weather.rainDelayActive ? `<p class="rain-delay-active">Rain delay active until ${weather.rainDelayUntil || "unknown"}</p>` : ""}
+          <p>Weather Entity: ${escapeHtml(weather.weatherEntity)}</p>
+          ${weather.rainDelayActive ? `<p class="rain-delay-active">Rain delay active until ${escapeHtml(weather.rainDelayUntil || "unknown")}</p>` : ""}
         </div>
         <div>
           ${weather.rainDelayActive ? `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.disableRainDelay()">Clear Rain Delay</button>` : `<button class="btn btn-secondary" onclick="SmartSprinklerControlPanel.enableRainDelay()">Enable Rain Delay</button>`}
@@ -1945,13 +1961,13 @@
         <div class="schedule-item">
           <div class="schedule-info">
             <div class="schedule-header">
-              <h4>${schedule.name || "Unnamed Schedule"}</h4>
-              <span class="schedule-status ${statusClass}">${statusText}</span>
+              <h4>${escapeHtml(schedule.name || "Unnamed Schedule")}</h4>
+              <span class="schedule-status ${statusClass}">${escapeHtml(statusText)}</span>
             </div>
             <div class="schedule-details">
               <span class="schedule-time">
                 <ha-icon icon="mdi:clock-outline"></ha-icon>
-                ${schedule.start_time || "00:00"}
+                ${escapeHtml(schedule.start_time || "00:00")}
               </span>
               <span class="schedule-days">
                 <ha-icon icon="mdi:calendar"></ha-icon>
@@ -1964,13 +1980,13 @@
             </div>
           </div>
           <div class="schedule-actions">
-            <button class="btn btn-icon btn-run" onclick="SmartSprinklerControlPanel.runScheduleNow('${schedule.id}')" title="Run Now">
+            <button class="btn btn-icon btn-run" onclick="SmartSprinklerControlPanel.runScheduleNow(${jsArg(schedule.id)})" title="Run Now">
               <ha-icon icon="mdi:play"></ha-icon>
             </button>
-            <button class="btn btn-icon" onclick="SmartSprinklerControlPanel.showEditScheduleModal('${schedule.id}')" title="Edit">
+            <button class="btn btn-icon" onclick="SmartSprinklerControlPanel.showEditScheduleModal(${jsArg(schedule.id)})" title="Edit">
               <ha-icon icon="mdi:pencil"></ha-icon>
             </button>
-            <button class="btn btn-icon btn-danger-icon" onclick="SmartSprinklerControlPanel.deleteSchedule('${schedule.id}')" title="Delete">
+            <button class="btn btn-icon btn-danger-icon" onclick="SmartSprinklerControlPanel.deleteSchedule(${jsArg(schedule.id)})" title="Delete">
               <ha-icon icon="mdi:delete"></ha-icon>
             </button>
           </div>
@@ -2082,8 +2098,8 @@
       <div class="fire-order-item" draggable="true" data-zone-id="${zoneId}">
         <span class="fire-order-handle">\u2630</span>
         <span class="fire-order-num">${index + 1}</span>
-        <span class="fire-order-name">${name}</span>
-        <input type="number" class="fire-order-duration" value="${duration}" min="1" max="120"
+        <span class="fire-order-name">${escapeHtml(name)}</span>
+        <input type="number" class="fire-order-duration" value="${escapeHtml(duration)}" min="1" max="120"
                onchange="SmartSprinklerControlPanel.updateZoneDuration(${zoneId}, this.value)">
         <span class="fire-order-unit">min</span>
       </div>
@@ -2239,7 +2255,7 @@
         <input type="checkbox" class="zone-checkbox" data-zone-id="${zone.id}"
                ${isSelected ? "checked" : ""}
                onchange="SmartSprinklerControlPanel.toggleScheduleZone(${zone.id})">
-        <span>${zone.name || `Zone ${zone.id}`}</span>
+        <span>${escapeHtml(zone.name || `Zone ${zone.id}`)}</span>
       </label>
     `;
       }).join("");
@@ -2251,8 +2267,8 @@
       <div class="fire-order-item" draggable="true" data-zone-id="${zoneId}">
         <span class="fire-order-handle">\u2630</span>
         <span class="fire-order-num">${index + 1}</span>
-        <span class="fire-order-name">${name}</span>
-        <input type="number" class="fire-order-duration" value="${duration}" min="1" max="120"
+        <span class="fire-order-name">${escapeHtml(name)}</span>
+        <input type="number" class="fire-order-duration" value="${escapeHtml(duration)}" min="1" max="120"
                onchange="SmartSprinklerControlPanel.updateZoneDuration(${zoneId}, this.value)">
         <span class="fire-order-unit">min</span>
       </div>
@@ -2270,13 +2286,13 @@
           <div class="form-row-2col">
             <div class="form-group">
               <label>Schedule Name</label>
-              <input type="text" class="form-input" value="${data.name}"
+              <input type="text" class="form-input" value="${escapeHtml(data.name)}"
                      placeholder="e.g., Morning Watering"
                      onchange="SmartSprinklerControlPanel.updateScheduleField('name', this.value)">
             </div>
             <div class="form-group">
               <label>Start Time</label>
-              <input type="time" class="form-input" value="${data.start_time}"
+              <input type="time" class="form-input" value="${escapeHtml(data.start_time)}"
                      onchange="SmartSprinklerControlPanel.updateScheduleField('start_time', this.value)">
             </div>
           </div>
@@ -2349,7 +2365,7 @@
           <h2>Start Zone</h2>
           <button class="modal-close" onclick="SmartSprinklerControlPanel.closeDurationModal()">&times;</button>
         </div>
-        <p class="modal-zone-info">${zone.name || `Zone ${zone.id}`}</p>
+        <p class="modal-zone-info">${escapeHtml(zone.name || `Zone ${zone.id}`)}</p>
         <div class="duration-display">
           <div class="duration-controls">
             <button class="duration-btn" onclick="SmartSprinklerControlPanel.adjustDuration(-5)">\u2212</button>
@@ -2502,12 +2518,12 @@
           <div class="settings-form">
             <div class="form-group">
               <label>Zone Name</label>
-              <input type="text" class="form-input" value="${data.name || ""}"
+              <input type="text" class="form-input" value="${escapeHtml(data.name || "")}"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('name', this.value)">
             </div>
             <div class="form-group">
               <label>Default Duration (minutes)</label>
-              <input type="number" class="form-input" min="1" max="120" value="${data.duration || 15}"
+              <input type="number" class="form-input" min="1" max="120" value="${escapeHtml(data.duration || 15)}"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('duration', this.value)">
             </div>
             <div class="form-group">
@@ -2520,13 +2536,13 @@
             <div class="form-divider"></div>
             <div class="form-group">
               <label>Flow Rate (GPM) <span class="optional">optional</span></label>
-              <input type="number" class="form-input" step="0.1" min="0" value="${data.flow_rate || ""}"
+              <input type="number" class="form-input" step="0.1" min="0" value="${escapeHtml(data.flow_rate || "")}"
                 placeholder="e.g., 2.5"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('flow_rate', this.value)">
             </div>
             <div class="form-group">
               <label>Area (sq ft) <span class="optional">optional</span></label>
-              <input type="number" class="form-input" min="0" value="${data.area_sqft || ""}"
+              <input type="number" class="form-input" min="0" value="${escapeHtml(data.area_sqft || "")}"
                 placeholder="e.g., 500"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('area_sqft', this.value)">
             </div>
@@ -3109,12 +3125,12 @@
         const isOn = state.state === "on";
         return `
       <tr>
-        <td>${entityId}</td>
-        <td class="entity-state ${isOn ? "state-on" : "state-off"}">${state.state}</td>
-        <td>${state.attributes?.friendly_name || "-"}</td>
+        <td>${escapeHtml(entityId)}</td>
+        <td class="entity-state ${isOn ? "state-on" : "state-off"}">${escapeHtml(state.state)}</td>
+        <td>${escapeHtml(state.attributes?.friendly_name || "-")}</td>
         <td>
           <button class="btn btn-small ${isOn ? "btn-danger" : "btn-primary"}"
-                  onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">
+                  onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">
             ${isOn ? "Turn Off" : "Turn On"}
           </button>
         </td>
@@ -3125,11 +3141,11 @@
         const isOn = state.state === "on";
         return `
       <tr>
-        <td>${entityId}</td>
-        <td class="entity-state ${isOn ? "state-on" : "state-off"}">${state.state}</td>
+        <td>${escapeHtml(entityId)}</td>
+        <td class="entity-state ${isOn ? "state-on" : "state-off"}">${escapeHtml(state.state)}</td>
         <td>
           <button class="btn btn-small ${isOn ? "btn-danger" : "btn-primary"}"
-                  onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">
+                  onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">
             ${isOn ? "Turn Off" : "Turn On"}
           </button>
         </td>
@@ -3139,7 +3155,7 @@
       const compactSwitchRows = switchEntities.map(([entityId, state]) => {
         const zoneNum = entityId.replace("switch.sprinkler_", "");
         const isOn = state.state === "on";
-        return `<span class="debug-chip ${isOn ? "on" : "off"}" onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">Z${zoneNum}: ${isOn ? "ON" : "off"}</span>`;
+        return `<span class="debug-chip ${isOn ? "on" : "off"}" onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">Z${escapeHtml(zoneNum)}: ${isOn ? "ON" : "off"}</span>`;
       }).join("");
       return `
     <h2 class="section-title" style="font-size:14px;margin:12px 0 8px;">\u{1F527} Debug</h2>
@@ -3147,7 +3163,7 @@
       <div class="debug-grid">
         <div class="debug-col">
           <div class="debug-label">System</div>
-          <div class="debug-value">${systemState?.state || "-"} (${systemState?.attributes?.active_zones || 0} active)</div>
+          <div class="debug-value">${escapeHtml(systemState?.state || "-")} (${escapeHtml(systemState?.attributes?.active_zones || 0)} active)</div>
           <div class="debug-label">Switches</div>
           <div class="debug-chips">${compactSwitchRows}</div>
           <button class="btn btn-danger btn-xs" onclick="SmartSprinklerControlPanel.stopAllSwitches()">Stop All</button>
@@ -3183,7 +3199,7 @@
         return `
       <div class="debug-row">
         <span>Z${zone.id}</span>
-        <span>BE:${zone.remaining_time ?? "-"}/${zone.watering_duration ?? "-"}m</span>
+        <span>BE:${escapeHtml(zone.remaining_time ?? "-")}/${escapeHtml(zone.watering_duration ?? "-")}m</span>
         <span>Local:${localRemain}</span>
       </div>`;
       }).join("");
@@ -3196,7 +3212,7 @@
       const zones = this.dataManager.getZones();
       const rows = zones.map((z) => {
         const st = z.state === "watering" ? "RUN" : z.state === "idle" ? "idle" : z.state;
-        return `<span class="debug-chip ${z.state === "watering" ? "on" : ""}">${z.id}:${st}</span>`;
+        return `<span class="debug-chip ${z.state === "watering" ? "on" : ""}">${z.id}:${escapeHtml(st)}</span>`;
       }).join("");
       return `<div class="debug-label">Zone States</div><div class="debug-chips">${rows}</div>`;
     }

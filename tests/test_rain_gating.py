@@ -33,14 +33,11 @@ _CC = (
 
 
 # --- Stub the heavy HA imports pulled in by the modules under test ----------
-for mod_name in (
-    "homeassistant",
-    "homeassistant.core",
-):
-    sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
-sys.modules["homeassistant.core"].HomeAssistant = object
-
-
+# No Home Assistant stubs here on purpose: models/zone.py imports only the
+# standard library, and _load below is only ever called for that file. The
+# stubs this block used to install were unnecessary, and one of them
+# (`homeassistant.core.HomeAssistant = object`) overwrote the real class
+# process-wide, breaking any later test that needed genuine Home Assistant.
 def _load(mod_name: str, rel_path: str):
     """Load a source module file directly under a private test name."""
     spec = importlib.util.spec_from_file_location(mod_name, _CC / rel_path)

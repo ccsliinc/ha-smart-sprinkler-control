@@ -14,6 +14,7 @@ import { rainChartMethods } from './rain-chart.js';
 import { zoneCardMethods } from './zone-cards.js';
 import { scheduleMethods } from './schedules.js';
 import { modalMethods } from './modals.js';
+import { escapeHtml, jsArg } from './html.js';
 
 class SmartSprinklerControlPanel extends HTMLElement {
   constructor() {
@@ -755,12 +756,12 @@ class SmartSprinklerControlPanel extends HTMLElement {
       const isOn = state.state === 'on';
       return `
       <tr>
-        <td>${entityId}</td>
-        <td class="entity-state ${isOn ? 'state-on' : 'state-off'}">${state.state}</td>
-        <td>${state.attributes?.friendly_name || '-'}</td>
+        <td>${escapeHtml(entityId)}</td>
+        <td class="entity-state ${isOn ? 'state-on' : 'state-off'}">${escapeHtml(state.state)}</td>
+        <td>${escapeHtml(state.attributes?.friendly_name || '-')}</td>
         <td>
           <button class="btn btn-small ${isOn ? 'btn-danger' : 'btn-primary'}"
-                  onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">
+                  onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">
             ${isOn ? 'Turn Off' : 'Turn On'}
           </button>
         </td>
@@ -772,11 +773,11 @@ class SmartSprinklerControlPanel extends HTMLElement {
       const isOn = state.state === 'on';
       return `
       <tr>
-        <td>${entityId}</td>
-        <td class="entity-state ${isOn ? 'state-on' : 'state-off'}">${state.state}</td>
+        <td>${escapeHtml(entityId)}</td>
+        <td class="entity-state ${isOn ? 'state-on' : 'state-off'}">${escapeHtml(state.state)}</td>
         <td>
           <button class="btn btn-small ${isOn ? 'btn-danger' : 'btn-primary'}"
-                  onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">
+                  onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">
             ${isOn ? 'Turn Off' : 'Turn On'}
           </button>
         </td>
@@ -788,7 +789,7 @@ class SmartSprinklerControlPanel extends HTMLElement {
     const compactSwitchRows = switchEntities.map(([entityId, state]) => {
       const zoneNum = entityId.replace('switch.sprinkler_', '');
       const isOn = state.state === 'on';
-      return `<span class="debug-chip ${isOn ? 'on' : 'off'}" onclick="SmartSprinklerControlPanel.toggleSwitch('${entityId}')">Z${zoneNum}: ${isOn ? 'ON' : 'off'}</span>`;
+      return `<span class="debug-chip ${isOn ? 'on' : 'off'}" onclick="SmartSprinklerControlPanel.toggleSwitch(${jsArg(entityId)})">Z${escapeHtml(zoneNum)}: ${isOn ? 'ON' : 'off'}</span>`;
     }).join('');
 
     return `
@@ -797,7 +798,7 @@ class SmartSprinklerControlPanel extends HTMLElement {
       <div class="debug-grid">
         <div class="debug-col">
           <div class="debug-label">System</div>
-          <div class="debug-value">${systemState?.state || '-'} (${systemState?.attributes?.active_zones || 0} active)</div>
+          <div class="debug-value">${escapeHtml(systemState?.state || '-')} (${escapeHtml(systemState?.attributes?.active_zones || 0)} active)</div>
           <div class="debug-label">Switches</div>
           <div class="debug-chips">${compactSwitchRows}</div>
           <button class="btn btn-danger btn-xs" onclick="SmartSprinklerControlPanel.stopAllSwitches()">Stop All</button>
@@ -836,7 +837,7 @@ class SmartSprinklerControlPanel extends HTMLElement {
       return `
       <div class="debug-row">
         <span>Z${zone.id}</span>
-        <span>BE:${zone.remaining_time ?? '-'}/${zone.watering_duration ?? '-'}m</span>
+        <span>BE:${escapeHtml(zone.remaining_time ?? '-')}/${escapeHtml(zone.watering_duration ?? '-')}m</span>
         <span>Local:${localRemain}</span>
       </div>`;
     }).join('');
@@ -851,7 +852,7 @@ class SmartSprinklerControlPanel extends HTMLElement {
     const zones = this.dataManager.getZones();
     const rows = zones.map(z => {
       const st = z.state === 'watering' ? 'RUN' : z.state === 'idle' ? 'idle' : z.state;
-      return `<span class="debug-chip ${z.state === 'watering' ? 'on' : ''}">${z.id}:${st}</span>`;
+      return `<span class="debug-chip ${z.state === 'watering' ? 'on' : ''}">${z.id}:${escapeHtml(st)}</span>`;
     }).join('');
     return `<div class="debug-label">Zone States</div><div class="debug-chips">${rows}</div>`;
   }

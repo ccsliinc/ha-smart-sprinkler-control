@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ha-smart-sprinkler-control"
-version = "2025.1.0"
+version = "2025.1.10"
 description = "Professional Home Assistant sprinkler control integration with Zero Sensor Pollution Architecture"
 readme = "README.md"
 license = {text = "MIT"}

@@ -3,6 +3,7 @@
  */
 
 import { DAYS_OF_WEEK } from './constants.js';
+import { escapeHtml, jsArg } from './html.js';
 
 export const scheduleMethods = {
   renderSchedules() {
@@ -23,13 +24,13 @@ export const scheduleMethods = {
         <div class="schedule-item">
           <div class="schedule-info">
             <div class="schedule-header">
-              <h4>${schedule.name || 'Unnamed Schedule'}</h4>
-              <span class="schedule-status ${statusClass}">${statusText}</span>
+              <h4>${escapeHtml(schedule.name || 'Unnamed Schedule')}</h4>
+              <span class="schedule-status ${statusClass}">${escapeHtml(statusText)}</span>
             </div>
             <div class="schedule-details">
               <span class="schedule-time">
                 <ha-icon icon="mdi:clock-outline"></ha-icon>
-                ${schedule.start_time || '00:00'}
+                ${escapeHtml(schedule.start_time || '00:00')}
               </span>
               <span class="schedule-days">
                 <ha-icon icon="mdi:calendar"></ha-icon>
@@ -42,13 +43,13 @@ export const scheduleMethods = {
             </div>
           </div>
           <div class="schedule-actions">
-            <button class="btn btn-icon btn-run" onclick="SmartSprinklerControlPanel.runScheduleNow('${schedule.id}')" title="Run Now">
+            <button class="btn btn-icon btn-run" onclick="SmartSprinklerControlPanel.runScheduleNow(${jsArg(schedule.id)})" title="Run Now">
               <ha-icon icon="mdi:play"></ha-icon>
             </button>
-            <button class="btn btn-icon" onclick="SmartSprinklerControlPanel.showEditScheduleModal('${schedule.id}')" title="Edit">
+            <button class="btn btn-icon" onclick="SmartSprinklerControlPanel.showEditScheduleModal(${jsArg(schedule.id)})" title="Edit">
               <ha-icon icon="mdi:pencil"></ha-icon>
             </button>
-            <button class="btn btn-icon btn-danger-icon" onclick="SmartSprinklerControlPanel.deleteSchedule('${schedule.id}')" title="Delete">
+            <button class="btn btn-icon btn-danger-icon" onclick="SmartSprinklerControlPanel.deleteSchedule(${jsArg(schedule.id)})" title="Delete">
               <ha-icon icon="mdi:delete"></ha-icon>
             </button>
           </div>
@@ -179,8 +180,8 @@ export const scheduleMethods = {
       <div class="fire-order-item" draggable="true" data-zone-id="${zoneId}">
         <span class="fire-order-handle">☰</span>
         <span class="fire-order-num">${index + 1}</span>
-        <span class="fire-order-name">${name}</span>
-        <input type="number" class="fire-order-duration" value="${duration}" min="1" max="120"
+        <span class="fire-order-name">${escapeHtml(name)}</span>
+        <input type="number" class="fire-order-duration" value="${escapeHtml(duration)}" min="1" max="120"
                onchange="SmartSprinklerControlPanel.updateZoneDuration(${zoneId}, this.value)">
         <span class="fire-order-unit">min</span>
       </div>
@@ -379,7 +380,7 @@ export const scheduleMethods = {
         <input type="checkbox" class="zone-checkbox" data-zone-id="${zone.id}"
                ${isSelected ? 'checked' : ''}
                onchange="SmartSprinklerControlPanel.toggleScheduleZone(${zone.id})">
-        <span>${zone.name || `Zone ${zone.id}`}</span>
+        <span>${escapeHtml(zone.name || `Zone ${zone.id}`)}</span>
       </label>
     `;
     }).join('');
@@ -393,8 +394,8 @@ export const scheduleMethods = {
       <div class="fire-order-item" draggable="true" data-zone-id="${zoneId}">
         <span class="fire-order-handle">☰</span>
         <span class="fire-order-num">${index + 1}</span>
-        <span class="fire-order-name">${name}</span>
-        <input type="number" class="fire-order-duration" value="${duration}" min="1" max="120"
+        <span class="fire-order-name">${escapeHtml(name)}</span>
+        <input type="number" class="fire-order-duration" value="${escapeHtml(duration)}" min="1" max="120"
                onchange="SmartSprinklerControlPanel.updateZoneDuration(${zoneId}, this.value)">
         <span class="fire-order-unit">min</span>
       </div>
@@ -416,13 +417,13 @@ export const scheduleMethods = {
           <div class="form-row-2col">
             <div class="form-group">
               <label>Schedule Name</label>
-              <input type="text" class="form-input" value="${data.name}"
+              <input type="text" class="form-input" value="${escapeHtml(data.name)}"
                      placeholder="e.g., Morning Watering"
                      onchange="SmartSprinklerControlPanel.updateScheduleField('name', this.value)">
             </div>
             <div class="form-group">
               <label>Start Time</label>
-              <input type="time" class="form-input" value="${data.start_time}"
+              <input type="time" class="form-input" value="${escapeHtml(data.start_time)}"
                      onchange="SmartSprinklerControlPanel.updateScheduleField('start_time', this.value)">
             </div>
           </div>

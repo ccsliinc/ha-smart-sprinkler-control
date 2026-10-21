@@ -3,6 +3,8 @@
  * chart.update (no rebuild), local-TZ consumption, Chart.js loader.
  */
 
+import { escapeHtml } from './html.js';
+
 export const rainChartMethods = {
   _startRainRefresh() {
     if (this._rainRefreshInterval) return;
@@ -51,8 +53,8 @@ export const rainChartMethods = {
           Precipitation (24h)
         </h3>
         <div style="display: flex; align-items: center; gap: 12px;">
-          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 ${unit}</span>
-          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 ${unit}</span>
+          <span id="rain-today" style="color: #00ffff; font-size: 12px; font-weight: bold;">Today: 0.0 ${escapeHtml(unit)}</span>
+          <span id="rain-total" style="color: #888; font-size: 12px;">24h: 0.0 ${escapeHtml(unit)}</span>
         </div>
       </div>
       <div style="height: 120px; position: relative;">
@@ -74,17 +76,18 @@ export const rainChartMethods = {
     }
 
     try {
-      // Fetch from backend API
-      const response = await fetch('/api/smart_sprinkler_control/precipitation');
-
-      if (!response.ok) {
-        // Transient/network/server error: keep the section visible (the chart
-        // will show last-known or empty data) rather than hiding it.
-        console.warn('[SSC] Precipitation API error:', response.status);
-        return this._getEmptyRainData('api error');
-      }
-
-      const data = await response.json();
+      // Fetch from the backend API through hass.callApi, which injects the
+      // viewer's Home Assistant auth token and prefixes /api/. A bare fetch()
+      // sends no Authorization header, and this endpoint requires auth: it
+      // returns precipitation-sensor entity ids and recorder history and runs
+      // a recorder query per hit, so it must not be world-readable.
+      // callApi resolves with the parsed JSON body and REJECTS on a non-2xx
+      // response, so transport and server errors land in the catch below
+      // (which keeps the section visible with empty data, as before).
+      const data = await this._hass.callApi(
+        'GET',
+        'smart_sprinkler_control/precipitation'
+      );
       if (this._isDebugEnabled?.()) {
         console.log('[SSC] Precipitation data from API:', data);
       }

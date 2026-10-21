@@ -15,7 +15,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@master
+        # Pinned to an immutable commit: a mutable @master ref would let
+        # anyone who can push to that branch run code in this repo's CI.
+        uses: home-assistant/actions/hassfest@cd6f3635a740c84d8a14f6121a90068b8ece6bf6 # master @ 2026-10-17 (repo publishes no usable tags)
 
   hacs:
     name: HACS
@@ -24,7 +26,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: HACS validation
-        uses: hacs/action@main
+        # Pinned to an immutable commit. NOTE: the newest hacs/action tag
+        # (22.5.0) points at a 2022 commit, while main has kept moving, so
+        # this pins main's current head rather than that stale tag.
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main @ 2026-06-08 (post-22.5.0)
         with:
           category: integration
 

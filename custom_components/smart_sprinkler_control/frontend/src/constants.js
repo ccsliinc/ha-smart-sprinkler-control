@@ -31,4 +31,4 @@ export const SERVICES = {
 };
 
 /** Panel version */
-export const VERSION = '2025.1.0';
+export const VERSION = '2025.1.10';

@@ -2,6 +2,8 @@
  * Zone card / header / weather / no-systems rendering.
  */
 
+import { escapeHtml } from './html.js';
+
 export const zoneCardMethods = {
   renderHeader() {
     const systemName =
@@ -18,7 +20,7 @@ export const zoneCardMethods = {
 
     return `
     <div class="panel-header">
-      <h1>${systemName}</h1>
+      <h1>${escapeHtml(systemName)}</h1>
       <div class="header-actions">
         ${
           isAnyZoneActive
@@ -87,14 +89,14 @@ export const zoneCardMethods = {
           <div class="zone-header-left">
             <ha-icon class="zone-icon ${iconClass}" icon="${zoneIconName}"></ha-icon>
             <div class="zone-title-block">
-              <span class="zone-name">${zone.name || `Zone ${zone.id}`}</span>
+              <span class="zone-name">${escapeHtml(zone.name || `Zone ${zone.id}`)}</span>
               <span class="zone-number">Zone ${zone.id}</span>
             </div>
           </div>
           <button class="zone-settings-btn" onclick="SmartSprinklerControlPanel.showZoneSettings(${zone.id})" title="Zone Settings">\u2699\uFE0F</button>
         </div>
         <div class="zone-status-row">
-          <span class="zone-status ${statusClass}">${statusText}</span>
+          <span class="zone-status ${statusClass}">${escapeHtml(statusText)}</span>
         </div>
         ${cardContent}
         <div class="zone-controls">
@@ -170,7 +172,7 @@ export const zoneCardMethods = {
     <div class="zone-stat-row">
       <ha-icon icon="${stat.icon}"></ha-icon>
       <span class="zone-stat-label">${stat.label}</span>
-      <span class="zone-stat-value">${stat.value}</span>
+      <span class="zone-stat-value">${escapeHtml(stat.value)}</span>
     </div>
   `).join('');
 
@@ -253,10 +255,10 @@ export const zoneCardMethods = {
     <div class="weather-card">
       <div class="weather-info">
         <div>
-          <p>Weather Entity: ${weather.weatherEntity}</p>
+          <p>Weather Entity: ${escapeHtml(weather.weatherEntity)}</p>
           ${
             weather.rainDelayActive
-              ? `<p class="rain-delay-active">Rain delay active until ${weather.rainDelayUntil || 'unknown'}</p>`
+              ? `<p class="rain-delay-active">Rain delay active until ${escapeHtml(weather.rainDelayUntil || 'unknown')}</p>`
               : ''
           }
         </div>

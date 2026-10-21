@@ -1,128 +1,133 @@
-"""HTTP views for Smart Sprinkler Control frontend."""
+"""HTTP views and static frontend path for Smart Sprinkler Control."""
 
 import logging
 from pathlib import Path
 
 from aiohttp import web
-from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.core import HomeAssistant
 
+from ..const import DOMAIN
 from .precipitation import PrecipitationAPI
 
 _LOGGER = logging.getLogger(__name__)
 
+# Public URL prefix the built panel bundle is served from.
+#
+# SECURITY: the panel bundle used to be served by a hand-rolled
+# HomeAssistantView that joined a client-supplied `{filename}` onto the dist
+# directory with pathlib. pathlib DISCARDS the base directory when the right
+# operand is absolute (Path("/a/b") / "/etc/passwd" == Path("/etc/passwd")), so
+# an absolute request path escaped the dist directory entirely and returned any
+# UTF-8 file the Home Assistant process could read. HA core's security_filter
+# middleware rejects "../" traversal but NOT the absolute form.
+#
+# Static assets are now served by HA's own static-path handler, which resolves
+# the request against this root and refuses anything outside it, serves off the
+# event loop, and needs no hand-written containment check.
+FRONTEND_STATIC_URL = "/smart_sprinkler_control_static"
 
-class SmartSprinklerControlFrontendView(HomeAssistantView):
-    """View to serve Smart Sprinkler Control frontend files."""
+# On-disk directory that backs FRONTEND_STATIC_URL (the built panel bundle).
+FRONTEND_DIST_PATH = Path(__file__).parent.parent / "frontend" / "dist"
 
-    requires_auth = False
-    url = "/api/smart_sprinkler_control/frontend/{filename}"
-    name = "api:smart_sprinkler_control:frontend"
-
-    def __init__(self, hass: HomeAssistant):
-        """Initialize the view.
-
-        Args:
-            hass: Home Assistant instance
-        """
-        self.hass = hass
-        self.frontend_path = Path(__file__).parent.parent / "frontend" / "dist"
-
-    async def get(self, request: web.Request, filename: str) -> web.Response:
-        """Serve frontend files.
-
-        Args:
-            request: HTTP request
-            filename: Requested filename
-
-        Returns:
-            HTTP response with file content
-        """
-        try:
-            file_path = self.frontend_path / filename
-
-            if not file_path.exists():
-                _LOGGER.error("Frontend file not found: %s", file_path)
-                msg = f"File not found: {filename}"
-                return web.Response(text=msg, status=404)
-
-            content = await self.hass.async_add_executor_job(
-                lambda: file_path.read_text(encoding="utf-8")
-            )
-
-            content_type = "application/javascript"
-            if filename.endswith(".css"):
-                content_type = "text/css"
-            elif filename.endswith(".html"):
-                content_type = "text/html"
-            elif filename.endswith(".map"):
-                content_type = "application/json"
-
-            _LOGGER.debug("Serving frontend file: %s", filename)
-
-            return web.Response(
-                text=content,
-                content_type=content_type,
-                headers={
-                    "Cache-Control": "no-cache, no-store, must-revalidate",
-                    "Pragma": "no-cache",
-                    "Expires": "0",
-                },
-            )
-
-        except Exception as e:
-            _LOGGER.error("Error serving frontend file %s: %s", filename, e)
-            return web.Response(text=f"Error serving file: {e}", status=500)
+# Key under hass.data holding run-scoped (not entry-scoped) registration flags.
+# Static paths and views are process-wide and cannot be registered twice.
+RUNTIME_DATA_KEY = f"{DOMAIN}_runtime"
 
 
 class PrecipitationHistoryView(HomeAssistantView):
-    """View to serve precipitation history data."""
+    """Authenticated view serving 24h precipitation history for the panel.
+
+    SECURITY: this view exposes precipitation-sensor entity ids and recorder
+    history, and runs a recorder query per request. It inherits
+    ``HomeAssistantView.requires_auth = True`` deliberately - do NOT add a
+    ``requires_auth = False`` override. The panel fetches it through
+    ``hass.callApi``, which carries the viewer's Home Assistant auth token.
+    """
 
     url = "/api/smart_sprinkler_control/precipitation"
     name = "api:smart_sprinkler_control:precipitation"
-    requires_auth = False
 
-    def __init__(self, precip_api: PrecipitationAPI):
+    def __init__(self, precip_api: PrecipitationAPI) -> None:
         """Initialize the view.
 
-        Args:
-            precip_api: PrecipitationAPI instance
+        Inputs:
+            precip_api: PrecipitationAPI instance that performs the query.
+        Outputs:
+            None.
         """
         self._precip_api = precip_api
 
     async def get(self, request: web.Request) -> web.Response:
         """Handle GET request for precipitation history.
 
-        Args:
-            request: HTTP request
-
-        Returns:
-            HTTP response with precipitation history data
+        Inputs:
+            request: HTTP request (already authenticated by HA).
+        Outputs:
+            web.Response - JSON precipitation history payload.
         """
         return await self._precip_api.get_precipitation_history(request)
 
 
 async def async_register_http_views(hass: HomeAssistant) -> None:
-    """Register HTTP views for Smart Sprinkler Control.
+    """Register the static frontend path and the precipitation data API.
 
-    Args:
-        hass: Home Assistant instance
+    Description:
+        Registers, exactly once per Home Assistant run, the static path that
+        serves the built panel bundle and the authenticated precipitation view.
+        Both are process-wide: ``async_register_static_paths`` raises if the
+        same URL is registered twice, and HA logs "View ... is already
+        registered" for a duplicate view. A config-entry reload calls this
+        again (the unload side cannot remove either), so the guard lives in a
+        run-scoped ``hass.data`` namespace rather than per-entry data.
+    Inputs:
+        hass: Home Assistant instance.
+    Outputs:
+        None.
     """
     _LOGGER.debug("Registering Smart Sprinkler Control HTTP views")
-    hass.http.register_view(SmartSprinklerControlFrontendView(hass))
 
-    # Register precipitation history API
-    precip_api = PrecipitationAPI(hass)
-    hass.http.register_view(PrecipitationHistoryView(precip_api))
+    runtime = hass.data.setdefault(RUNTIME_DATA_KEY, {})
 
-    _LOGGER.info("Smart Sprinkler Control HTTP views registered")
+    if not runtime.get("static_path_registered"):
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    FRONTEND_STATIC_URL,
+                    str(FRONTEND_DIST_PATH),
+                    # cache_headers=False: the panel URL is cache-busted with a
+                    # content hash (see frontend/panel.py), so long-lived
+                    # caching would only ever pin a stale bundle.
+                    False,
+                )
+            ]
+        )
+        runtime["static_path_registered"] = True
+        _LOGGER.info(
+            "Registered Smart Sprinkler Control static path %s -> %s",
+            FRONTEND_STATIC_URL,
+            FRONTEND_DIST_PATH,
+        )
+
+    if not runtime.get("precipitation_view_registered"):
+        hass.http.register_view(PrecipitationHistoryView(PrecipitationAPI(hass)))
+        runtime["precipitation_view_registered"] = True
+        _LOGGER.info("Smart Sprinkler Control HTTP views registered")
 
 
 async def async_unregister_http_views(hass: HomeAssistant) -> None:
-    """Unregister HTTP views for Smart Sprinkler Control.
+    """Note that HTTP views and static paths outlive the config entry.
 
-    Args:
-        hass: Home Assistant instance
+    Description:
+        Home Assistant has no public API to remove a registered view or static
+        path, so both intentionally persist for the life of the process. The
+        run-scoped flags in ``hass.data[RUNTIME_DATA_KEY]`` are left in place so
+        a later entry setup does not attempt a duplicate registration.
+    Inputs:
+        hass: Home Assistant instance.
+    Outputs:
+        None.
     """
-    _LOGGER.debug("Unregistering Smart Sprinkler Control HTTP views")
-    _LOGGER.info("Smart Sprinkler Control HTTP views unregistered")
+    _LOGGER.debug(
+        "Smart Sprinkler Control HTTP views remain registered for this HA run"
+    )

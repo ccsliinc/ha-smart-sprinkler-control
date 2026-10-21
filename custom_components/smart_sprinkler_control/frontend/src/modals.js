@@ -2,6 +2,8 @@
  * Duration picker modal + zone-settings modal.
  */
 
+import { escapeHtml } from './html.js';
+
 export const modalMethods = {
   renderDurationModal() {
     if (!this._durationModalOpen || !this._durationModalZone) {
@@ -30,7 +32,7 @@ export const modalMethods = {
           <h2>Start Zone</h2>
           <button class="modal-close" onclick="SmartSprinklerControlPanel.closeDurationModal()">&times;</button>
         </div>
-        <p class="modal-zone-info">${zone.name || `Zone ${zone.id}`}</p>
+        <p class="modal-zone-info">${escapeHtml(zone.name || `Zone ${zone.id}`)}</p>
         <div class="duration-display">
           <div class="duration-controls">
             <button class="duration-btn" onclick="SmartSprinklerControlPanel.adjustDuration(-5)">−</button>
@@ -223,12 +225,12 @@ export const modalMethods = {
           <div class="settings-form">
             <div class="form-group">
               <label>Zone Name</label>
-              <input type="text" class="form-input" value="${data.name || ''}"
+              <input type="text" class="form-input" value="${escapeHtml(data.name || '')}"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('name', this.value)">
             </div>
             <div class="form-group">
               <label>Default Duration (minutes)</label>
-              <input type="number" class="form-input" min="1" max="120" value="${data.duration || 15}"
+              <input type="number" class="form-input" min="1" max="120" value="${escapeHtml(data.duration || 15)}"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('duration', this.value)">
             </div>
             <div class="form-group">
@@ -241,13 +243,13 @@ export const modalMethods = {
             <div class="form-divider"></div>
             <div class="form-group">
               <label>Flow Rate (GPM) <span class="optional">optional</span></label>
-              <input type="number" class="form-input" step="0.1" min="0" value="${data.flow_rate || ''}"
+              <input type="number" class="form-input" step="0.1" min="0" value="${escapeHtml(data.flow_rate || '')}"
                 placeholder="e.g., 2.5"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('flow_rate', this.value)">
             </div>
             <div class="form-group">
               <label>Area (sq ft) <span class="optional">optional</span></label>
-              <input type="number" class="form-input" min="0" value="${data.area_sqft || ''}"
+              <input type="number" class="form-input" min="0" value="${escapeHtml(data.area_sqft || '')}"
                 placeholder="e.g., 500"
                 onchange="SmartSprinklerControlPanel.updateSettingsField('area_sqft', this.value)">
             </div>

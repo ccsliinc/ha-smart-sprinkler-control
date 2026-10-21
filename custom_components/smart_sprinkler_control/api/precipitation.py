@@ -287,10 +287,14 @@ class PrecipitationAPI:
             )
 
         except Exception as e:
+            # Full detail (type, message, traceback) goes to the log for the
+            # operator. The client gets a generic message: this endpoint is
+            # reachable by any logged-in user, and exception text can disclose
+            # entity ids, file paths and recorder/database internals.
             _LOGGER.exception("Error fetching precipitation history: %s", e)
             return web.json_response(
                 {
-                    "error": str(e),
+                    "error": "Could not load precipitation history",
                     "hourly": [],
                     "today_total": 0,
                     "total_24h": 0,

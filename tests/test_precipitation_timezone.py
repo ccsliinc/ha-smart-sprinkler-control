@@ -17,6 +17,7 @@ import types
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -46,30 +47,6 @@ class _FakeDtUtil(types.ModuleType):
         return _NOW_LOCAL.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-# Stub the heavy Home Assistant imports pulled in at module import time.
-for mod_name in (
-    "aiohttp",
-    "homeassistant",
-    "homeassistant.components",
-    "homeassistant.components.recorder",
-    "homeassistant.components.recorder.history",
-    "homeassistant.core",
-    "homeassistant.util",
-):
-    sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
-
-_fake_dt = _FakeDtUtil("homeassistant.util.dt")
-sys.modules["homeassistant.util.dt"] = _fake_dt
-sys.modules["homeassistant.util"].dt = _fake_dt
-
-sys.modules["aiohttp"].web = MagicMock()
-sys.modules["homeassistant.components.recorder"].get_instance = MagicMock()
-sys.modules["homeassistant.components.recorder.history"].get_significant_states = (
-    MagicMock()
-)
-sys.modules["homeassistant.core"].HomeAssistant = object
-
-
 # web.json_response just echoes the dict back so the test can inspect it.
 def _json_response(payload, status=200):
     """Capture the response payload for assertions."""
@@ -79,7 +56,48 @@ def _json_response(payload, status=200):
     return resp
 
 
-sys.modules["aiohttp"].web.json_response = _json_response
+_fake_dt = _FakeDtUtil("homeassistant.util.dt")
+
+
+# Stub the heavy Home Assistant imports pulled in at module import time.
+#
+# Installed ONLY for the duration of the import below, via patch.dict. These
+# names ARE present in the dev and CI venvs, so writing the stubs permanently
+# into sys.modules replaced attributes on the REAL packages process-wide -
+# notably homeassistant.util.dt, which this module deliberately swaps for a
+# fixed-timezone fake. Any later test needing genuine Home Assistant then died
+# on an import error raised from inside Home Assistant, with nothing pointing
+# back here. precipitation.py binds dt_util at exec time and keeps the fake, so
+# scoping the patch changes nothing for these tests.
+def _build_stubs() -> dict:
+    """Return the stub modules precipitation.py needs at import time.
+
+    Outputs:
+        dict - sys.modules overlay, suitable for mock.patch.dict.
+    """
+    stubs = {
+        name: types.ModuleType(name)
+        for name in (
+            "aiohttp",
+            "homeassistant",
+            "homeassistant.components",
+            "homeassistant.components.recorder",
+            "homeassistant.components.recorder.history",
+            "homeassistant.core",
+            "homeassistant.util",
+        )
+    }
+    stubs["homeassistant.util.dt"] = _fake_dt
+    stubs["homeassistant.util"].dt = _fake_dt
+    stubs["aiohttp"].web = MagicMock()
+    stubs["aiohttp"].web.json_response = _json_response
+    stubs["homeassistant.components.recorder"].get_instance = MagicMock()
+    stubs["homeassistant.components.recorder.history"].get_significant_states = (
+        MagicMock()
+    )
+    stubs["homeassistant.core"].HomeAssistant = object
+    return stubs
+
 
 # Import the module under test directly from the source file.
 _PRECIP_PATH = (
@@ -93,7 +111,8 @@ _spec = importlib.util.spec_from_file_location(
     "precipitation_tz_under_test", _PRECIP_PATH
 )
 precipitation = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(precipitation)
+with mock.patch.dict(sys.modules, _build_stubs()):
+    _spec.loader.exec_module(precipitation)
 
 
 @dataclass

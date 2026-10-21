@@ -9,33 +9,56 @@ import sys
 import types
 from dataclasses import dataclass, field
 from pathlib import Path
+from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
 
+
 # Stub the heavy Home Assistant imports pulled in at module import time so the
 # discovery logic can be tested in isolation without a running HA instance.
-for mod_name in (
-    "aiohttp",
-    "homeassistant",
-    "homeassistant.components",
-    "homeassistant.components.recorder",
-    "homeassistant.components.recorder.history",
-    "homeassistant.core",
-    "homeassistant.util",
-    "homeassistant.util.dt",
-):
-    sys.modules.setdefault(mod_name, types.ModuleType(mod_name))
+#
+# The stubs are installed ONLY for the duration of the import below, via
+# patch.dict. They used to be written straight into sys.modules and left there,
+# which looked harmless while nothing else in the suite used Home Assistant for
+# real. It is not harmless: these names ARE installed in the dev and CI venvs,
+# so `sys.modules["aiohttp"].web = MagicMock()` replaced the attribute on the
+# REAL aiohttp package process-wide, and the same for
+# homeassistant.core.HomeAssistant and homeassistant.util.dt. Any later test
+# that needs the genuine Home Assistant HTTP harness then failed with an
+# import error from inside Home Assistant itself, with nothing pointing back
+# here. The module under test keeps the stub objects it bound at exec time, so
+# scoping the patch changes nothing for these tests.
+def _build_stubs() -> dict:
+    """Return the stub modules precipitation.py needs at import time.
 
-sys.modules["aiohttp"].web = MagicMock()
-sys.modules["homeassistant.components.recorder"].get_instance = MagicMock()
-sys.modules["homeassistant.components.recorder.history"].get_significant_states = (
-    MagicMock()
-)
-sys.modules["homeassistant.core"].HomeAssistant = object
-# precipitation.py imports `from homeassistant.util import dt as dt_util`; the
-# discovery tests don't exercise time handling, so a MagicMock stub suffices.
-sys.modules["homeassistant.util"].dt = sys.modules["homeassistant.util.dt"]
+    Outputs:
+        dict - sys.modules overlay, suitable for mock.patch.dict.
+    """
+    stubs = {
+        name: types.ModuleType(name)
+        for name in (
+            "aiohttp",
+            "homeassistant",
+            "homeassistant.components",
+            "homeassistant.components.recorder",
+            "homeassistant.components.recorder.history",
+            "homeassistant.core",
+            "homeassistant.util",
+            "homeassistant.util.dt",
+        )
+    }
+    stubs["aiohttp"].web = MagicMock()
+    stubs["homeassistant.components.recorder"].get_instance = MagicMock()
+    stubs["homeassistant.components.recorder.history"].get_significant_states = (
+        MagicMock()
+    )
+    stubs["homeassistant.core"].HomeAssistant = object
+    # precipitation.py imports `from homeassistant.util import dt as dt_util`;
+    # the discovery tests don't exercise time handling, so a stub suffices.
+    stubs["homeassistant.util"].dt = stubs["homeassistant.util.dt"]
+    return stubs
+
 
 # Import the function under test directly from the source file.
 _PRECIP_PATH = (
@@ -47,7 +70,8 @@ _PRECIP_PATH = (
 )
 _spec = importlib.util.spec_from_file_location("precipitation_under_test", _PRECIP_PATH)
 precipitation = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(precipitation)
+with mock.patch.dict(sys.modules, _build_stubs()):
+    _spec.loader.exec_module(precipitation)
 discover_precipitation_sensors = precipitation.discover_precipitation_sensors
 
 

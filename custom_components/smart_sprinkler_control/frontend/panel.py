@@ -7,6 +7,7 @@ from pathlib import Path
 from homeassistant.components import frontend
 from homeassistant.core import HomeAssistant
 
+from ..api.http import FRONTEND_STATIC_URL
 from ..const import VERSION
 
 _LOGGER = logging.getLogger(__name__)
@@ -16,8 +17,12 @@ PANEL_TITLE = "Sprinkler Control"
 PANEL_ICON = "mdi:sprinkler-variant"
 PANEL_CONFIG_PANEL_DOMAIN = "smart_sprinkler_control_panel"
 
-# Built panel JS served by SmartSprinklerControlFrontendView
-# (/api/smart_sprinkler_control/frontend/{filename}).
+# Built panel JS, served from the dist directory registered as a Home
+# Assistant static path (see api/http.py FRONTEND_STATIC_URL). Static assets
+# are served unauthenticated by design - the browser loads panel JS with a
+# plain module fetch that carries no HA auth header - but the static-path
+# handler contains the request to the dist directory, so only the bundle is
+# reachable.
 PANEL_JS_FILENAME = "smart-sprinkler-control-panel.js"
 PANEL_JS_PATH = Path(__file__).parent / "dist" / PANEL_JS_FILENAME
 
@@ -58,9 +63,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     # Content-hash cache-buster: ?v=<hash> changes only when the panel JS
     # content changes, forcing browsers to refetch a new deploy automatically.
     cache_buster = await hass.async_add_executor_job(_compute_panel_cache_buster)
-    js_url = (
-        f"/api/smart_sprinkler_control/frontend/{PANEL_JS_FILENAME}?v={cache_buster}"
-    )
+    js_url = f"{FRONTEND_STATIC_URL}/{PANEL_JS_FILENAME}?v={cache_buster}"
     _LOGGER.debug("Panel JS URL: %s", js_url)
 
     if (
@@ -85,6 +88,15 @@ async def async_register_panel(hass: HomeAssistant) -> None:
                     "js_url": js_url,
                 }
             },
+            # Intentionally False: this is a household irrigation system and
+            # non-admin family members must be able to see the panel and run
+            # their sprinklers. Access control lives at the SERVICE layer
+            # instead - the three configuration mutators (update_zone_settings,
+            # create_schedule, delete_schedule) are registered with
+            # async_register_admin_service, while the seven operational
+            # services stay open. Do not "harden" this to True; it would hide
+            # the panel from the people who use it without protecting anything
+            # the service gating does not already protect.
             require_admin=False,
         )
 
