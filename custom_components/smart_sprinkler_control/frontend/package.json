@@ -9,7 +9,7 @@
     "build": "esbuild src/panel.js --bundle --format=iife --outfile=dist/smart-sprinkler-control-panel.js",
     "dev": "esbuild src/panel.js --bundle --format=iife --watch --outfile=dist/smart-sprinkler-control-panel.js",
     "clean": "rm -rf dist/*",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.0"

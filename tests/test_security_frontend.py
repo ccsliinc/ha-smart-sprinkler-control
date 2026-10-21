@@ -172,8 +172,16 @@ def test_escape_helper_behaviour_via_node():
     if node is None:
         pytest.skip("node not available; cannot evaluate the JS helper behaviour")
 
+    # Pass explicit FILE paths, not the directory. `node --test test/` resolves
+    # the positional argument as a module on Node 22 and fails with
+    # MODULE_NOT_FOUND; directory arguments only work on newer Node. Globbing
+    # here keeps this working on every Node that has --test, and no shell is
+    # involved. A missing test file must fail, not silently pass nothing.
+    test_files = sorted(p.name for p in (FRONTEND / "test").glob("*.test.mjs"))
+    assert test_files, "no JavaScript test files found"
+
     result = subprocess.run(  # noqa: S603 - fixed argv, no shell
-        [node, "--test", "test/"],
+        [node, "--test", *(f"test/{name}" for name in test_files)],
         cwd=FRONTEND,
         capture_output=True,
         text=True,
